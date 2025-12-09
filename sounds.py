@@ -1,42 +1,53 @@
 import numpy as np
 import pygame
 
-def generate_drone(freq=60, duration=1.0, sample_rate=44100):
-    """Generates a 60Hz hum with slight static."""
+def generate_drone(duration=1.0, sample_rate=44100):
+    """
+    Generates a 'Dark Ambient' server room texture.
+    Low frequencies, very subtle, no harsh static.
+    """
     t = np.linspace(0, duration, int(sample_rate * duration), False)
-    # Sine wave
-    wave = 0.5 * np.sin(2 * np.pi * freq * t)
-    # Add some noise/harmonics
-    noise = 0.1 * np.random.normal(0, 1, wave.shape)
-    audio = wave + noise
     
-    # Normalize to 16-bit range
-    audio = audio / np.max(np.abs(audio))
-    audio = (audio * 32767).astype(np.int16)
+    # Deep sub-bass (40Hz) + Low mid (100Hz) for warmth
+    # The slight offset (40 vs 41) creates a slow, relaxing binaural beat
+    wave1 = 0.6 * np.sin(2 * np.pi * 40 * t)
+    wave2 = 0.4 * np.sin(2 * np.pi * 41 * t)
+    wave3 = 0.2 * np.sin(2 * np.pi * 100 * t)
     
-    # Stereo
+    # Combine
+    wave = wave1 + wave2 + wave3
+    
+    # Normalize and keep volume LOW (10% of max)
+    max_val = np.max(np.abs(wave))
+    if max_val > 0:
+        wave = wave / max_val
+    
+    audio = (wave * 32767 * 0.1).astype(np.int16)
+    
     return np.column_stack((audio, audio))
 
-def generate_screech(duration=0.5, sample_rate=44100):
-    """Generates a digital screech/modem sound."""
+def generate_screech(duration=0.1, sample_rate=44100):
+    """
+    Replaces the 'screech' with a soft, watery data 'blip'.
+    Think: A droplet falling in a cavern, or a soft UI click.
+    """
     t = np.linspace(0, duration, int(sample_rate * duration), False)
     
-    # Carrier frequency that modulates
-    carrier = np.sin(2 * np.pi * 1200 * t) 
+    # Pure sine tone, mid-high frequency but very short
+    freq = 880 # A5
+    wave = np.sin(2 * np.pi * freq * t)
     
-    # Modulator (change pitch rapidly)
-    modulator = np.sin(2 * np.pi * 50 * t)
+    # Exponential decay to make it percussive (pluck sound)
+    envelope = np.exp(-30 * t) 
     
-    # Combined FM synthesis-ish
-    wave = 0.5 * np.sin(2 * np.pi * (1500 + 500 * modulator) * t)
-    
-    # Add high pitched noise
-    white_noise = 0.3 * np.random.normal(0, 1, wave.shape)
-    
-    audio = wave + white_noise
+    audio = wave * envelope
     
     # Normalize
-    audio = audio / np.max(np.abs(audio))
-    audio = (audio * 32767).astype(np.int16)
+    max_val = np.max(np.abs(audio))
+    if max_val > 0:
+        audio = audio / max_val
+        
+    # Keep volume subtle
+    audio = (audio * 32767 * 0.15).astype(np.int16)
     
     return np.column_stack((audio, audio))

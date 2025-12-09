@@ -94,10 +94,14 @@ class WiredWindow:
         self.running = True
 
         # Audio
-        self.drone_sound = pygame.sndarray.make_sound(sounds.generate_drone(duration=2.0))
+        # Use the updated sounds module
+        drone_data = sounds.generate_drone(duration=2.0)
+        self.drone_sound = pygame.sndarray.make_sound(drone_data)
         self.drone_sound.play(loops=-1)
         self.drone_sound.set_volume(0.3)
-        self.screech_sound = pygame.sndarray.make_sound(sounds.generate_screech())
+        
+        screech_data = sounds.generate_screech()
+        self.screech_sound = pygame.sndarray.make_sound(screech_data)
         self.screech_sound.set_volume(0.4)
         self.burst_timer = 0
 
