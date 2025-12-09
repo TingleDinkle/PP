@@ -2,35 +2,46 @@ import threading
 import queue
 import random
 import time
+import math
 from scapy.all import sniff, IP, TCP, UDP, conf
 
 # --- Constants ---
 # Colors
-COLOR_TCP = (0, 255, 255)   # Cyan
-COLOR_UDP = (255, 153, 0)   # Orange
-COLOR_OTHER = (100, 100, 100) # Grey for others
+COLOR_TCP = (0.0, 1.0, 1.0, 1.0)   # Cyan (normalized RGBA)
+COLOR_UDP = (1.0, 153/255.0, 0.0, 1.0)   # Orange (normalized RGBA)
+COLOR_OTHER = (100/255.0, 100/255.0, 100/255.0, 1.0) # Grey for others (normalized RGBA)
 
 # Packet Spawn Config
-SPAWN_Z_START = 10.0
-SPAWN_RANGE_X = 5.0
-SPAWN_RANGE_Y = 5.0
+PACKET_ORBITAL_RADIUS_MIN = 5.0 # Min radius for packets to orbit outside the tunnel
+PACKET_ORBITAL_RADIUS_MAX = 7.0 # Max radius for packets to orbit outside the tunnel
+PACKET_ORBITAL_SPEED_MIN = 0.02 # Min orbital speed
+PACKET_ORBITAL_SPEED_MAX = 0.05 # Max orbital speed
 
 class PacketObject:
     """
     Represents a visualized packet in 3D space.
     """
-    def __init__(self, src_ip, dst_ip, protocol, size):
+    def __init__(self, src_ip, dst_ip, protocol, size, payload):
         self.src = src_ip
         self.dst = dst_ip
         self.protocol = protocol
         self.size = size
+        self.payload = payload
         
         # 3D Position
-        # Randomize X/Y within a range to spread them out
-        self.x = random.uniform(-SPAWN_RANGE_X, SPAWN_RANGE_X)
-        self.y = random.uniform(-SPAWN_RANGE_Y, SPAWN_RANGE_Y)
-        self.z = SPAWN_Z_START
+        self.orbital_radius = random.uniform(PACKET_ORBITAL_RADIUS_MIN, PACKET_ORBITAL_RADIUS_MAX)
+        self.angle = random.uniform(0, 2 * math.pi) # Random initial angle
+        self.x = math.cos(self.angle) * self.orbital_radius
+        self.y = math.sin(self.angle) * self.orbital_radius * 0.5 # Flattened Y-axis for elliptical orbit
+        self.z = random.uniform(-5.0, -2.0) # Fixed Z-range
+
+        self.prev_x = self.x
+        self.prev_y = self.y
+        self.prev_z = self.z
         
+        # Orbital speed
+        self.orbital_speed = random.uniform(PACKET_ORBITAL_SPEED_MIN, PACKET_ORBITAL_SPEED_MAX)
+
         # Visual properties
         self.color = COLOR_OTHER
         if self.protocol == 'TCP':
@@ -38,21 +49,15 @@ class PacketObject:
         elif self.protocol == 'UDP':
             self.color = COLOR_UDP
             
-        # Calculate speed based on size (Heavier = Slower)
-        # Small packet (e.g. 64 bytes) -> Fast
-        # Large packet (e.g. 1500 bytes) -> Slow
-        # Base speed 0.2, min speed 0.05
-        # 1500 is max mtu usually.
+        # self.speed is no longer used for Z-movement, but keep if for potential future use
         self.speed = max(0.05, 0.3 - (self.size / 3000.0))
 
     def update(self):
         """
-        Moves the packet towards the viewer (decreasing Z).
-        Returns False if the packet has passed the viewer.
+        No longer moves the packet in Z, always returns True as movement is external.
         """
-        self.z -= self.speed
-        # Kill when it passes the camera (approx -8.0)
-        return self.z > -8.0
+        # Movement is handled in main_gl.py
+        return True
 
 class ProtocolListener(threading.Thread):
     """
@@ -67,6 +72,7 @@ class ProtocolListener(threading.Thread):
     def run(self):
         # Scapy sniff callback
         def process_packet(packet):
+            import math # Speculative fix: re-import math within callback
             if not self.running:
                 return False # Stop sniffing
             
@@ -81,8 +87,11 @@ class ProtocolListener(threading.Thread):
                 elif UDP in packet:
                     proto = 'UDP'
                 
+                # Extract payload summary
+                payload_data = packet.summary()
+                
                 # Create packet object
-                pkt_obj = PacketObject(src, dst, proto, size)
+                pkt_obj = PacketObject(src, dst, proto, size, payload_data)
                 
                 # Put in queue (non-blocking)
                 try:
@@ -98,10 +107,8 @@ class ProtocolListener(threading.Thread):
         # However, `sniff` blocks. We need a way to stop it cleanly or just let it die with the daemon.
         # Ideally, we use `stop_filter` lambda, but `daemon=True` is usually enough for simple apps.
         try:
-            # On Windows, need to make sure we have a valid interface.
-            # conf.use_pcap = True (default) - requires Npcap.
-            # If Npcap is missing, this might throw.
-            sniff(prn=process_packet, store=0)
+            while self.running: # Loop to continuously sniff while thread is running
+                sniff(prn=process_packet, store=0, stop_filter=lambda x: not self.running)
         except Exception as e:
             print(f"Sniffer Error: {e}")
             print("Make sure Npcap is installed on Windows for Scapy.")
