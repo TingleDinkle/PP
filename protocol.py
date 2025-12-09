@@ -3,10 +3,6 @@ import queue
 import random
 import time
 from scapy.all import sniff, IP, TCP, UDP, conf
-from scapy.arch.windows.native import L3WinSocket
-
-# Force L3socket for Windows compatibility without Npcap driver issues
-conf.L3socket = L3WinSocket
 
 # --- Constants ---
 # Colors
