@@ -57,3 +57,5 @@ python main_gl.py
 -   **W / S:** Move Forward / Backward
 -   **A / D:** Strafe Left / Right
 -   **ESC**: Quit the application.
+  
+# NOT FINISHED
