@@ -22,7 +22,7 @@ WIN_WIDTH = 800
 WIN_HEIGHT = 600
 TUNNEL_DEPTH = 40.0
 WIFI_Z_OFFSET = -35.0 # Z depth for WiFi entities
-MAX_PACKETS_DISPLAYED = 100 # Limit the number of packets displayed for performance
+MAX_PACKETS_DISPLAYED = 40 # Limit the number of packets displayed for performance
 
 # Colors (Normalized OpenGL RGBA)
 COL_CYAN = (0.0, 1.0, 1.0, 1.0)
@@ -50,70 +50,20 @@ uniform sampler2D tex;
 uniform float time;
 uniform float glitch_intensity;
 
-float rand(vec2 co){
-    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
-}
-
-// RGB to YIQ (NTSC)
-vec3 rgb2yiq(vec3 c){
-    return vec3(
-        0.299*c.r + 0.587*c.g + 0.114*c.b,
-        0.596*c.r - 0.275*c.g - 0.321*c.b,
-        0.212*c.r - 0.523*c.g + 0.311*c.b
-    );
-}
-
-// YIQ to RGB
-vec3 yiq2rgb(vec3 c){
-    return vec3(
-        1.0*c.x + 0.956*c.y + 0.621*c.z,
-        1.0*c.x - 0.272*c.y - 0.647*c.z,
-        1.0*c.x - 1.105*c.y + 1.702*c.z
-    );
-}
-
 void main() {
     vec2 uv = gl_TexCoord[0].st;
     
-    // 1. Pixel Sort / Tear
-    float tear = 0.0;
-    if (rand(vec2(time, uv.y)) > 0.98) {
-        tear = (rand(vec2(time, 0.0)) - 0.5) * glitch_intensity * 0.2;
-    }
-    uv.x += tear;
-
-    // 2. Chromatic Aberration + VHS Color Bleed (YIQ)
-    float r_offset = 0.003 * glitch_intensity;
-    float b_offset = -0.003 * glitch_intensity;
+    // Simple Scanline (Fast)
+    float scanline = sin(uv.y * 800.0) * 0.05;
     
-    vec3 col;
-    col.r = texture2D(tex, uv + vec2(r_offset, 0.0)).r;
-    col.g = texture2D(tex, uv).g;
-    col.b = texture2D(tex, uv + vec2(b_offset, 0.0)).b;
+    // Sample Texture
+    vec3 col = texture2D(tex, uv).rgb;
     
-    // Convert to YIQ for saturation boost & color drift
-    vec3 yiq = rgb2yiq(col);
-    yiq.y *= 1.2; 
-    yiq.z *= 1.2; 
-    col = yiq2rgb(yiq);
-
-    // 3. Simple Bloom (Glow)
-    vec4 sum = vec4(0);
-    for(int i= -2; i < 2; i++) {
-        for(int j= -2; j < 2; j++) {
-            sum += texture2D(tex, uv + vec2(i, j)*0.002) * 0.15;
-        }
-    }
-    if (length(sum.rgb) > 1.5) {
-       col += sum.rgb * 0.4;
-    }
-
-    // 4. Scanlines & Vignette
-    float scanline = sin(uv.y * 600.0 + time * 10.0) * 0.05;
-    float vig = 1.0 - length(uv - 0.5);
+    // Simple Green/Cyan Tint (Fast)
+    col *= vec3(0.8, 1.1, 1.0);
     
+    // Apply scanline
     col -= scanline;
-    col *= vig;
 
     gl_FragColor = vec4(col, 1.0);
 }
@@ -256,7 +206,7 @@ class TextTexture:
         glTranslatef(-self.width / 2, -self.height / 2, 0)
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
-        glColor4f(1, 1, 1, 1) # Textures use their own colors, modulate with white
+        # glColor4f(1, 1, 1, 1) # REMOVED: Allow caller to set color/alpha
         glBegin(GL_QUADS)
         glTexCoord2f(0, 0); glVertex3f(0, 0, 0)
         glTexCoord2f(1, 0); glVertex3f(self.width, 0, 0)
@@ -285,6 +235,187 @@ class WebcamTexture:
 
     def bind(self):
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
+
+class DigitalRain:
+    def __init__(self, font, data_source, side='left', color=(0.0, 1.0, 0.0, 1.0), columns=20):
+        self.font = font
+        self.data_source = data_source
+        self.side = side
+        self.color = color
+        self.columns = columns
+        self.drops = []
+        for i in range(columns):
+            self.drops.append({
+                'col_idx': i,
+                'y': random.uniform(-10, 10),
+                'speed': random.uniform(0.1, 0.3),
+                'chars': [self._get_char() for _ in range(random.randint(5, 15))]
+            })
+
+    def _get_char(self):
+        # Pull a byte from the data source if available
+        if self.data_source:
+            # We peek randomly or just take the last one? 
+            # Let's take a random sample from the buffer to make it look active
+            val = self.data_source[random.randint(0, len(self.data_source)-1)]
+            return f'{val:02X}'
+        else:
+            return f'{random.randint(0,255):02X}'
+
+    def update(self):
+        for drop in self.drops:
+            drop['y'] -= drop['speed']
+            if drop['y'] < -5:
+                drop['y'] = random.uniform(5, 10)
+                drop['speed'] = random.uniform(0.1, 0.3)
+                drop['chars'] = [self._get_char() for _ in range(random.randint(5, 15))]
+            
+            # Randomly change characters with real data
+            if random.random() < 0.1: # Increased update rate
+                drop['chars'][random.randint(0, len(drop['chars'])-1)] = self._get_char()
+
+    def draw(self, wired_engine):
+        glPushAttrib(GL_ENABLE_BIT | GL_DEPTH_BUFFER_BIT | GL_TEXTURE_BIT) # Save state
+        glDisable(GL_LIGHTING) # Text is self-illuminated
+        glDepthMask(GL_FALSE)  # Don't write to depth buffer (transparent overlay)
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_TEXTURE_2D) # Ensure texture is enabled
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE) # Critical for alpha texture blending
+        
+        # Batching: Group positions by character to reduce draw calls
+        # batches[char_str] = [ (x, y, z, alpha), ... ]
+        batches = {}
+        
+        for drop in self.drops:
+            for i, char in enumerate(drop['chars']):
+                # Spacing
+                z = -10 + (drop['col_idx'] * 0.8) 
+                y = drop['y'] + (i * 0.4)
+                
+                if y > 5 or y < -5: continue # Clip
+                
+                # Calculate X based on side
+                if self.side == 'left':
+                    x = -3.8
+                    yaw = 90
+                else: 
+                    x = 3.8
+                    yaw = -90
+                
+                # Apply nudge
+                # We can't apply simple translation in batch easily without matrix ops,
+                # so we pre-calculate world coordinates.
+                # However, drawing quads aligned to axes is easier. 
+                # The wall rain is rotated 90 deg around Y.
+                # Left wall (-3.8): facing right (+X). Text plane is YZ.
+                # Right wall (3.8): facing left (-X). Text plane is YZ.
+                
+                alpha = 1.0 - (i / len(drop['chars']))
+                
+                if char not in batches:
+                    batches[char] = []
+                batches[char].append((x, y, z, alpha))
+
+        # Draw batches
+        # We need to handle the rotation. 
+        # Since all text on one wall shares the same rotation, we can set the matrix once per wall
+        # if we treat coordinates as local to the wall.
+        
+        glPushMatrix()
+        if self.side == 'left':
+            glTranslatef(-3.8, 0, 0) # Move to wall
+            glRotatef(90, 0, 1, 0)   # Rotate
+        else:
+            glTranslatef(3.8, 0, 0)
+            glRotatef(-90, 0, 1, 0)
+        
+        glTranslatef(0, 0, 0.1) # Nudge out
+        
+        # Now we are in wall-local space. Text draws on XY plane? 
+        # No, TextTexture.draw draws on XY plane (0..width, 0..height).
+        # Our wall logic calculated 'z' as depth in tunnel, and 'y' as height.
+        # In the rotated space:
+        #   Original Global Y -> Local Y
+        #   Original Global Z -> Local X (because of 90 deg rot)
+        
+        # Let's verify:
+        # Left Wall: Rot 90 deg Y.
+        # Local X+ points to Global Z- 
+        # Local Z+ points to Global X+
+        # Wait, standard rotation:
+        # Rot 90 Y: (1,0,0) -> (0,0,-1). (0,0,1) -> (1,0,0).
+        # So Global Z corresponds to Local X.
+        
+        scale = 0.02
+
+        for char, instances in batches.items():
+            tex = wired_engine.get_label(char, self.color)
+            if tex.width == 0: continue
+            
+            glBindTexture(GL_TEXTURE_2D, tex.texture_id)
+            
+            w = tex.width * scale
+            h = tex.height * scale
+            
+            # Center offset
+            off_x = -w / 2
+            off_y = -h / 2
+            
+            glBegin(GL_QUADS)
+            for (gx, gy, gz, alpha) in instances:
+                glColor4f(1, 1, 1, alpha)
+                
+                # Convert Global Y/Z to Local X/Y
+                # In previous code: glTranslatef(-3.8, y, z) then Rotate(90, 0, 1, 0)
+                # Matrix order: Translate(T) -> Rotate(R) * v
+                # New logic: Rotate(R) -> Translate(T_wall) -> Translate(T_pos) * v ? No.
+                
+                # Let's stick to the local coordinates derived from y and z.
+                # Code was: glTranslatef(-3.8, y, z); glRotatef(90, ...);
+                # This means we move to (-3.8, y, z) THEN rotate. 
+                # So the coordinate system is rotated AT that point.
+                # Drawing (0,0,0) puts it at (-3.8, y, z).
+                
+                # If we Rotate FIRST (glRotatef(90...)), then X becomes Z, Z becomes -X.
+                # We want to place items at 'y' (up) and 'z' (depth).
+                
+                # Let's simplify. We can use the previous logic but inside the loop only for translation?
+                # No, too many matrix calls.
+                
+                # Optimization: 
+                # We are rendering in a space rotated by 90/-90.
+                # Local Y is Global Y.
+                # Local X is -Global Z (Left Wall) or Global Z (Right Wall)?
+                
+                # Previous: Translate(WallX, y, z) -> Rotate(90) -> Draw(0,0).
+                # This places the quad at WallX, y, z, facing correctly.
+                
+                # New: Translate(WallX, 0, 0) -> Rotate(90) -> Draw(local_x, local_y).
+                # We need to map (y, z) to (local_x, local_y).
+                
+                # If we translate to (-3.8, 0, 0) and rotate 90 Y:
+                # Local X+ is Global Z-.
+                # Local Y+ is Global Y+.
+                # So: local_x = -z. local_y = y.
+                
+                # Right wall (3.8, 0, 0), rotate -90 Y:
+                # Local X+ is Global Z+.
+                # So: local_x = z. local_y = y.
+                
+                lx = -gz if self.side == 'left' else gz
+                ly = gy
+                
+                # Draw Quad
+                glTexCoord2f(0, 0); glVertex3f(lx + off_x, ly + off_y, 0)
+                glTexCoord2f(1, 0); glVertex3f(lx + off_x + w, ly + off_y, 0)
+                glTexCoord2f(1, 1); glVertex3f(lx + off_x + w, ly + off_y + h, 0)
+                glTexCoord2f(0, 1); glVertex3f(lx + off_x, ly + off_y + h, 0)
+
+            glEnd()
+            
+        glPopMatrix()
+        glPopAttrib() # Restore state
 
 class SystemMonitor(threading.Thread):
     def __init__(self):
@@ -373,6 +504,13 @@ class WiredEngine:
         self.packet_queue = queue.Queue()
         self.listener = protocol.ProtocolListener(self.packet_queue)
         self.listener.start()
+        
+        # Shared Data Buffer for Wall Rain (Real Sniffed Data)
+        # deque with maxlen to keep a running history of bytes
+        self.data_buffer = collections.deque(maxlen=2000) 
+        # Pre-fill with some random data so it's not empty initially
+        for _ in range(200): self.data_buffer.append(random.randint(0, 255))
+
         self.wifi_scanner = wifi_scanner.WifiScanner() # Init WiFi scanner
         self.wifi_scanner.start()
 
@@ -382,6 +520,21 @@ class WiredEngine:
         self.labels = {} 
         self.post_process = ShaderPostProcess(WIN_WIDTH, WIN_HEIGHT)
         
+        # Digital Rain (Left: Green, Right: Red)
+        self.rain_left = DigitalRain(self.font, self.data_buffer, side='left', color=COL_HEX)
+        self.rain_right = DigitalRain(self.font, self.data_buffer, side='right', color=COL_RED)
+        
+        # Pre-cache all hex textures to prevent lag during runtime
+        print("Pre-caching textures...")
+        for i in range(256):
+            h = f"{i:02X}"
+            self.get_label(h, COL_HEX)
+            self.get_label(h, COL_RED)
+        print("Textures cached.")
+        
+        # Generate Glow Texture for Packet Heads
+        self.glow_tex = self.create_glow_texture()
+
         # State
         self.cam_pos = [0.0, 0.0, 5.0] # Start slightly back
         self.cam_yaw = 0.0
@@ -394,6 +547,30 @@ class WiredEngine:
         self.glitch_level = 0.0 # This uniform existed in the shader this was based on
 
         self.running = True
+        self.clock = pygame.time.Clock() # For smooth framerate
+
+    def create_glow_texture(self):
+        # Generate a radial gradient texture (32x32)
+        size = 64
+        surface = pygame.Surface((size, size), pygame.SRCALPHA)
+        center = size // 2
+        max_radius = size // 2
+        
+        # Manually draw radial gradient
+        for r in range(max_radius, 0, -1):
+            alpha = int(255 * (1.0 - (r / max_radius))**2) # Quadratic falloff for "hot" core
+            color = (255, 255, 255, alpha)
+            pygame.draw.circle(surface, color, (center, center), r)
+            
+        # Convert to OpenGL Texture
+        tex_id = glGenTextures(1)
+        data = pygame.image.tostring(surface, "RGBA", True)
+        
+        glBindTexture(GL_TEXTURE_2D, tex_id)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, size, size, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
+        return tex_id
 
     def get_label(self, text, color=(200, 200, 200)):
         key = (text, color)
@@ -453,36 +630,62 @@ class WiredEngine:
             while True:
                 p = self.packet_queue.get_nowait()
                 self.packets.append(p)
+                
+                # Extract bytes from payload string for the wall rain
+                # Packet payload is a string summary, let's just take the ASCII values
+                if p.payload:
+                    for char in p.payload:
+                        self.data_buffer.append(ord(char) % 256)
+                
                 if len(self.packets) > MAX_PACKETS_DISPLAYED:
                     self.packets.pop(0) # Remove oldest packet
                 self.glitch_level = 0.3 # Reduced initial glitch level
         except queue.Empty: pass
         
         # Update and remove old packets
-        # Instead of calling p.update(), handle movement here
+        # DATA HIGHWAY (Straight Lanes for Readability)
         updated_packets = []
-        for p in self.packets:
-            p.prev_x = p.x # Store previous position for line drawing
+        t = time.time()
+        
+        for i, p in enumerate(self.packets):
+            # Initialize history and lane
+            if not hasattr(p, 'history'):
+                p.history = collections.deque(maxlen=20)
+                p.base_z_offset = random.uniform(0, TUNNEL_DEPTH)
+                
+                # Assign Lane based on Protocol
+                # Lane Width = 2.0
+                if p.protocol == 'TCP':
+                    p.lane_x = -2.5 # Left Lane
+                elif p.protocol == 'UDP':
+                    p.lane_x = 2.5 # Right Lane
+                else:
+                    p.lane_x = 0.0 # Center Lane
+                
+                # Add slight random Y offset to avoid perfect stacking
+                p.lane_y = random.uniform(-1.5, 1.5)
+
+            p.prev_x = p.x 
             p.prev_y = p.y
             p.prev_z = p.z
+            p.history.append((p.x, p.y, p.z))
 
-            p.angle += p.orbital_speed # Update orbital angle
+            # Continuous Z Movement (Slower for reading)
+            scroll_speed = 2.0 # Reduced from 3.0
+            range_len = TUNNEL_DEPTH + 10.0
             
-            # Update X and Y based on new angle and orbital radius
-            p.x = math.cos(p.angle) * p.orbital_radius
-            p.y = math.sin(p.angle) * p.orbital_radius * 0.5 # Flattened Y-axis for elliptical orbit
-
-            # Z-oscillation to add subtle movement instead of static Z
-            p.z = p.z + math.sin(time.time() * 2 + p.angle) * 0.005 # Small Z-oscillation
-
-            # Remove packets if they go too far back (or perhaps too far forward in an oscillation)
-            # For now, let's just make sure they stay in a visible range
-            if p.z < self.cam_pos[2] - 10.0 or p.z > self.cam_pos[2] + 10.0: # Keep within ~20 units of camera Z
-                # Re-initialize Z to keep it visible
-                p.z = random.uniform(-5.0, -2.0)
+            z_val = (p.base_z_offset + t * scroll_speed) % range_len
+            p.z = -TUNNEL_DEPTH + z_val
             
+            # Fixed X/Y (Highway)
+            p.x = p.lane_x
+            p.y = p.lane_y
+            
+            # No rotation/angle needed for straight lines
+            p.angle = 0 
+
             updated_packets.append(p)
-        self.packets = updated_packets # No filtering by p.update() anymore
+        self.packets = updated_packets
 
         # 3. Satellites
         current_procs = self.monitor.processes
@@ -498,6 +701,8 @@ class WiredEngine:
                     'port': port # Store port
                 })
         
+        self.rain_left.update()
+        self.rain_right.update()
         self.rotation += 0.5
         self.glitch_level *= 0.9 # Decay glitch
 
@@ -523,88 +728,264 @@ class WiredEngine:
         glEnd()
 
     def draw_packets(self):
-        glEnable(GL_TEXTURE_2D)
+        # DATA HIGHWAY VISUALIZATION
+        glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT | GL_TEXTURE_BIT)
+        
         glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE) # Additive for trails
+        glDisable(GL_DEPTH_TEST) # X-Ray trails
+        
+        # 1. Draw Straight Trails (Laser Beams)
+        glDisable(GL_TEXTURE_2D)
+        glLineWidth(3.0) 
         
         for p in self.packets:
-            # Scale line width by packet size
-            # Min size ~64 bytes, Max size ~1500 bytes (approx)
-            # Map this to a line width from 0.5 to 5.0
-            line_width = 0.5 + (p.size / 1500.0) * 4.5
-            glLineWidth(line_width) 
-
-            # Draw line behind packet
-            glColor4f(*p.color)
-            glBegin(GL_LINES)
-            glVertex3f(p.prev_x, p.prev_y, p.prev_z)
-            glVertex3f(p.x, p.y, p.z)
+            if not hasattr(p, 'history') or len(p.history) < 2: continue
+            
+            glBegin(GL_LINE_STRIP)
+            for i, (hx, hy, hz) in enumerate(p.history):
+                # Fade trail
+                alpha = (i / len(p.history)) * 0.5
+                glColor4f(p.color[0], p.color[1], p.color[2], alpha)
+                glVertex3f(hx, hy, hz)
             glEnd()
+
+        # 2. Draw Packet Data (The "Payload")
+        # Switch to standard blending for text readability
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
+        glEnable(GL_TEXTURE_2D)
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        
+        for p in self.packets:
+            # Draw Glowing Head
+            # Just a simple point or quad? Quad with glow texture is best.
+            # Reuse billboard logic? 
+            # Simplified: Just draw text.
             
-            payload_lbl = self.get_label(p.payload, COL_CYAN) # Set label color to cyan
-            # Removed debug print: print(f"Packet Payload: '{p.payload}'")
+            # TEXT LABEL
+            # Color based on protocol
+            label_col = p.color # Use packet color (Cyan/Orange)
             
-            # Draw packet text
+            # Get text texture
+            # Limit text length to avoid clutter
+            display_text = p.payload[:20] + "..." if len(p.payload) > 20 else p.payload
+            lbl = self.get_label(f"[{p.protocol}] {display_text}", label_col)
+            
             glPushMatrix()
-            glTranslatef(p.x, p.y, p.z)
-
-            # Orient text to face along the orbital path (roughly outwards or tangent)
-            # The +90 degrees is to make the text face outwards from the orbit center
-            glRotatef(math.degrees(p.angle) + 90, 0, 1, 0)
-            glRotatef(90, 1, 0, 0) # Orient text upright
-
-            # Scale text
-            scale_factor = 0.005 # Adjust as needed
-            glScalef(scale_factor, scale_factor, scale_factor)
-
-            # Center text texture
-            glTranslatef(-payload_lbl.width / 2, -payload_lbl.height / 2, 0)
-
-            payload_lbl.draw(0, 0, 0, scale=1.0) # TextTexture.draw handles its own scaling
+            glTranslatef(p.x, p.y + 0.3, p.z) # Float slightly above trail
+            
+            # BILLBOARDING: Always face camera
+            # In simple FPS cam (cam is at 0,0,5 looking -Z), 
+            # we just need to cancel out the modelview rotation?
+            # Or just start with Identity (facing +Z) and... wait.
+            # If we just draw in XY plane at Z depth, it faces the camera implicitly in this setup?
+            # No, camera rotates.
+            # We need to rotate OPPOSITE to self.cam_yaw, self.cam_pitch.
+            glRotatef(-self.cam_yaw, 0, 1, 0)
+            glRotatef(-self.cam_pitch, 1, 0, 0)
+            
+            # Scale for readability
+            scale = 0.008 # Large enough to read
+            glScalef(scale, scale, scale)
+            glTranslatef(-lbl.width/2, 0, 0) # Center text
+            
+            lbl.draw(0, 0, 0, 1.0)
             glPopMatrix()
-
-        glDisable(GL_TEXTURE_2D)
-        glDisable(GL_BLEND)
-        glLineWidth(1.5) # Reset global line width after drawing packets
+            
+        glPopAttrib()
 
 
 
     def draw_satellites(self):
-        for obj in self.active_procs_objs:
-            angle = obj['angle'] + math.radians(self.rotation)
-            x = math.cos(angle) * obj['radius']
-            y = math.sin(angle) * obj['radius'] * 0.5
-            z = -8.0 
+        # "System Bus" Visualization
+        # A rotating ring of data points around the core
+        
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_LIGHTING) 
+        glEnable(GL_BLEND)
+        glLineWidth(1.5) 
+        
+        center_z = -15.0 # Match Hypercore Z
+        radius = 8.0 # Wider ring around the core
+        
+        glPushMatrix()
+        glTranslatef(0, 0, center_z)
+        
+        # 1. Draw the Bus Ring (Wireframe Circle)
+        # Counter-rotate against the core for contrast
+        glRotatef(-self.rotation * 0.5, 0, 0, 1) 
+        
+        glColor4f(0.0, 0.5, 0.5, 0.3) 
+        glBegin(GL_LINE_LOOP)
+        for i in range(80):
+            theta = 2.0 * math.pi * i / 80.0
+            glVertex3f(math.cos(theta) * radius, math.sin(theta) * radius, 0)
+        glEnd()
+        
+        # 2. Draw Process Nodes on the Ring
+        # We use a fixed time offset for rotation to make them orbit
+        orbit_speed = 0.2
+        t = time.time()
+        
+        for i, obj in enumerate(self.active_procs_objs):
+            # Smooth Orbit: Angle = Base Angle + Time
+            # Spread them out evenly: i / count
+            base_angle = (i / max(1, len(self.active_procs_objs))) * 2 * math.pi
+            angle = base_angle + (t * orbit_speed)
             
-            glPointSize(5) # Original size
-            glBegin(GL_POINTS)
-            glColor4f(*obj['color']) # Use original color (now 4 elements)
-            glVertex3f(x, y, z)
+            px = math.cos(angle) * radius
+            py = math.sin(angle) * radius
+            
+            # Draw Node (Diamond)
+            glPushMatrix()
+            glTranslatef(px, py, 0)
+            glRotatef(self.rotation * 5, 0, 0, 1) # Spin the node
+            glScalef(0.2, 0.2, 0.2)
+            
+            glColor4f(*obj['color'])
+            glBegin(GL_QUADS)
+            glVertex3f(0, 1, 0); glVertex3f(1, 0, 0)
+            glVertex3f(0, -1, 0); glVertex3f(-1, 0, 0)
             glEnd()
+            glPopMatrix()
             
+            # 3. Draw Connection Line (faint)
             glBegin(GL_LINES)
-            glColor4f(0.0, 0.2, 0.2, 1.0) # Original tether color (now 4 elements)
-            glVertex3f(x, y, z)
-            glVertex3f(0, 0, -8.0) 
+            glColor4f(obj['color'][0], obj['color'][1], obj['color'][2], 0.1)
+            glVertex3f(px, py, 0)
+            glVertex3f(0, 0, 0)
             glEnd()
             
-            # Create a combined label for name and port
-            process_text = obj['name']
-            if obj['port']:
-                process_text = f"{obj['name']}:{obj['port']}"
+            # 4. Draw Label (Readable!)
+            # Only draw if it's in the top half (or just prevent overlapping)
+            # Let's draw all but billboard them
+            glPushMatrix()
+            glTranslatef(px, py + 0.5, 0) # Above the node
             
-            lbl = self.get_label(process_text, (1.0, 1.0, 1.0, 1.0)) # White for names, now 4 elements
-            lbl.draw(x + 0.2, y, z, scale=0.02) # Original scale
+            # Billboard: Inverse rotation of the ring group?
+            # We rotated -self.rotation * 0.5 around Z.
+            # So we rotate +self.rotation * 0.5 around Z to stay upright?
+            glRotatef(self.rotation * 0.5, 0, 0, 1)
+            
+            # Scale down
+            glScalef(0.015, 0.015, 0.015) # Readable size
+            
+            # Centering
+            # We don't have text width here easily without get_label first
+            # But get_label caches it.
+            
+            process_text = obj['name']
+            lbl = self.get_label(process_text, COL_WHITE)
+            glTranslatef(-lbl.width/2, 0, 0)
+            
+            glEnable(GL_TEXTURE_2D)
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+            lbl.draw(0, 0, 0, 1.0)
+            glDisable(GL_TEXTURE_2D)
+            
+            glPopMatrix()
+
+        glPopMatrix()
+        glPopAttrib()
 
 
     def draw_chip(self):
+        # "Utterly Complex" Hypercore
+        # Force visibility: Disable depth test to draw ON TOP of everything (Hologram style)
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glDisable(GL_LIGHTING) 
+        glDisable(GL_DEPTH_TEST) # ALWAYS VISIBLE
+        glEnable(GL_BLEND)
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE) # Additive glow
+        
         glPushMatrix()
-        glTranslatef(0, 0, -8.0) 
-        glRotatef(self.rotation * 2, 0, 1, 0)
-        glRotatef(30, 1, 0, 0)
-        s = 1.0 + (self.monitor.cpu / 200.0)
+        glTranslatef(0, 0, -15.0) # Push back a bit more to be in the "center" of the tunnel view
+        
+        # 1. The Nucleus (Pulsing Energy Sphere)
+        pulse = 1.0 + math.sin(time.time() * 3.0) * 0.2
+        glColor4f(1.0, 0.1, 0.1, 1.0) # Full opacity red
+        glPushMatrix()
+        glScalef(pulse, pulse, pulse)
+        sphere = gluNewQuadric()
+        gluSphere(sphere, 0.8, 16, 16) # Larger
+        glPopMatrix()
+        
+        # 2. Inner Rotating Cube (Wireframe)
+        glPushMatrix()
+        glRotatef(self.rotation * 3, 1, 1, 0)
+        glColor4f(1.0, 0.6, 0.0, 0.8) # Brighter orange
+        glLineWidth(3.0) # Thicker
+        s = 2.0
         glScalef(s, s, s)
-        glColor3f(COL_RED[0], COL_RED[1], COL_RED[2]) # Original color
+        self.draw_wire_cube()
+        glPopMatrix()
+        
+        # 3. Outer Counter-Rotating Octahedron
+        glPushMatrix()
+        glRotatef(-self.rotation * 2, 0, 1, 1)
+        glColor4f(0.0, 1.0, 1.0, 0.6)
+        glLineWidth(2.0)
+        s = 3.5 # Much larger
+        glScalef(s, s, s)
+        self.draw_wire_octahedron()
+        glPopMatrix()
+        
+        # 4. Gyroscopic Rings
+        for i in range(4): # More rings
+            glPushMatrix()
+            glRotatef(self.rotation * (1 + i*0.3), (i==0), (i==1), (i==2))
+            glColor4f(0.2, 0.4, 1.0, 0.5)
+            gluDisk(gluNewQuadric(), 4.0 + i*0.4, 4.1 + i*0.4, 64, 1)
+            glPopMatrix()
+            
+        # 5. DATA RINGS (Text Orbiting the Core)
+        # Draw a ring of rotating hex codes
+        glEnable(GL_TEXTURE_2D)
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        
+        chars = "0123456789ABCDEF"
+        num_chars = 16
+        ring_radius = 5.5
+        
+        glPushMatrix()
+        glRotatef(self.rotation * 10, 0, 1, 0) # Rotate the ring of text
+        
+        for i in range(num_chars):
+            angle = (i / num_chars) * 2 * math.pi
+            x = math.cos(angle) * ring_radius
+            z = math.sin(angle) * ring_radius
+            
+            # Pick a character based on time + index to make it "scramble"
+            char_idx = int(time.time() * 10 + i) % 16
+            char = chars[char_idx]
+            
+            lbl = self.get_label(char, COL_CYAN)
+            
+            glPushMatrix()
+            glTranslatef(x, 0, z)
+            # Billboard to face outward or camera? Outward is cooler for a ring.
+            glRotatef(-math.degrees(angle) - 90, 0, 1, 0) 
+            
+            lbl.draw(0, 0, 0, 0.05) # Draw large char
+            glPopMatrix()
+            
+        glPopMatrix()
+
+        glPopMatrix()
+        glPopAttrib()
+
+    def draw_wire_cube(self):
+        glBegin(GL_LINES)
+        for x in [-1, 1]:
+            for y in [-1, 1]:
+                glVertex3f(x, y, -1); glVertex3f(x, y, 1)
+                glVertex3f(x, -1, y); glVertex3f(x, 1, y)
+                glVertex3f(-1, x, y); glVertex3f(1, x, y)
+        glEnd()
+
+    def draw_wire_octahedron(self):
         glBegin(GL_LINES)
         # Top pyramid
         glVertex3f(0,1,0); glVertex3f(1,0,0)
@@ -622,9 +1003,13 @@ class WiredEngine:
         glVertex3f(-1,0,0); glVertex3f(0,0,-1)
         glVertex3f(0,0,-1); glVertex3f(1,0,0)
         glEnd()
-        glPopMatrix()
 
     def draw_stats_walls(self):
+        glPushAttrib(GL_ENABLE_BIT | GL_TEXTURE_BIT)
+        glEnable(GL_BLEND)
+        glEnable(GL_TEXTURE_2D)
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        
         ram_lbl = self.get_label(f"RAM: {self.monitor.ram}%", (0.0, 1.0, 1.0, 1.0)) # Cyan
         glPushMatrix()
         glTranslatef(-3.9, 0, -5)
@@ -640,32 +1025,21 @@ class WiredEngine:
         glTranslatef(0, 0, 0.05) # Push slightly out from the wall
         cpu_lbl.draw(0, 0, 0, 0.03) # Original scale
         glPopMatrix()
-
-    def draw_hex_wall(self):
-        start_z = 2.0
-        for i in range(15):
-            z = start_z + (i * 0.5)
-            world_y = -3 + (i / 15.0) * 6
-            hex_str = ' '.join(f'{random.randint(0,255):02X}' for _ in range(4))
-            lbl = self.get_label(hex_str, COL_HEX) # Use COL_HEX (4 elements now)
-            
-            glPushMatrix()
-            glTranslatef(-3.8, world_y, -10 + z) # Left wall deep
-            glRotatef(90, 0, 1, 0)
-            glTranslatef(0, 0, 0.05) # Push slightly out from the wall
-            lbl.draw(0, 0, 0, 0.02)
-            glPopMatrix()
+        
+        glPopAttrib()
 
     def draw_wifi_networks(self):
         networks = self.wifi_scanner.networks
         if not networks:
             return
-
+            
+        glPushAttrib(GL_ENABLE_BIT | GL_TEXTURE_BIT)
+        glEnable(GL_BLEND)
+        
         # Starting position for WiFi network labels
         start_x = 3.9  # Right wall
         start_z = WIFI_Z_OFFSET # Z depth for WiFi entities, defined in constants
         y_offset_step = 0.4 # Vertical spacing between networks
-        signal_bar_offset_x = 0.05 # Offset for the signal bars from the text
 
         for i, (ssid, signal) in enumerate(networks[:10]): # Limit to first 10 for display
             # Determine color based on signal strength
@@ -676,44 +1050,39 @@ class WiredEngine:
             else:
                 color = (1.0, 0.0, 0.0, 1.0) # Red for weak
 
-            # Draw SSID
+            # 1. Draw Glowing Signal Dot (Clean UI)
+            glDisable(GL_TEXTURE_2D)
+            glDisable(GL_LIGHTING)
+            glPushMatrix()
+            glTranslatef(start_x, 2.5 - (i * y_offset_step), start_z)
+            glRotatef(-90, 0, 1, 0)
+            glTranslatef(0, 0, 0.05) # Wall offset
+            
+            # Draw dot
+            glPointSize(8.0)
+            glBegin(GL_POINTS)
+            glColor4f(*color)
+            glVertex3f(0, 0, 0)
+            glEnd()
+            glPopMatrix()
+
+            # 2. Draw SSID Text (To the RIGHT of dot)
+            glEnable(GL_TEXTURE_2D)
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+            
             ssid_lbl = self.get_label(ssid, color)
             glPushMatrix()
             glTranslatef(start_x, 2.5 - (i * y_offset_step), start_z)
             glRotatef(-90, 0, 1, 0) # Rotate to face forward
             glTranslatef(0, 0, 0.05) # Push slightly out from the wall
+            
+            # Offset text to the right 
+            glTranslatef(0.2, -0.05, 0) # Adjust vertically to center with dot
+            
             ssid_lbl.draw(0, 0, 0, 0.015)
             glPopMatrix()
-
-            # Draw Signal Strength as bars
-            glPushMatrix()
-            glTranslatef(start_x, 2.5 - (i * y_offset_step) - 0.2, start_z) # Slightly below SSID
-            glRotatef(-90, 0, 1, 0)
-            glTranslatef(0, 0, 0.05) # Push slightly out from the wall
-
-            num_bars = int(signal / 25) + 1 # 1 to 4 bars
-            bar_scale_factor = 0.05 # Increased scale factor for visibility
-            
-            # Apply scaling for the bars
-            glScalef(bar_scale_factor, bar_scale_factor, 1)
-
-            bar_width = 8.0 # Larger absolute values, will be scaled down
-            bar_height = 20.0
-            bar_spacing = 4.0
-            
-            for bar_idx in range(num_bars):
-                # Calculate position for each bar (these are now absolute, will be scaled)
-                bar_x = signal_bar_offset_x + (bar_idx * (bar_width + bar_spacing))
-                bar_y = 0.0 # Align with the bottom of the previous text
-                
-                glColor4f(*color)
-                glBegin(GL_QUADS)
-                glVertex3f(bar_x, bar_y, 0)
-                glVertex3f(bar_x + bar_width, bar_y, 0)
-                glVertex3f(bar_x + bar_width, bar_y + bar_height, 0)
-                glVertex3f(bar_x, bar_y + bar_height, 0)
-                glEnd()
-            glPopMatrix()
+        
+        glPopAttrib()
 
     def draw_ghost_wall(self):
         z = -TUNNEL_DEPTH
@@ -820,7 +1189,8 @@ class WiredEngine:
         self.draw_satellites()
         self.draw_packets()
         self.draw_stats_walls()
-        self.draw_hex_wall() 
+        self.rain_left.draw(self)
+        self.rain_right.draw(self)
         self.draw_wifi_networks() 
         
         t = time.time() - self.start_time
@@ -840,7 +1210,7 @@ class WiredEngine:
                 self.update()
                 
                 self.draw()
-                pygame.time.wait(10)
+                self.clock.tick(60) # Limit to 60 FPS for smoothness
         except Exception as e:
             print(f"Error in loop: {e}")
             import traceback

@@ -25,7 +25,7 @@ class WifiScanner(threading.Thread):
                 # print(f"WiFi Scan Error: {e}")
                 pass
             
-            time.sleep(5.0) # Scan every 5 seconds (scanning is slow)
+            time.sleep(20.0) # Scan every 20 seconds (scanning is slow)
 
     def _parse_output(self, output):
         # Very basic parsing
