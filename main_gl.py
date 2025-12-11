@@ -314,6 +314,7 @@ class WiredEngine:
         self.cam_pos = [0.0, 0.0, 5.0] 
         self.cam_yaw = 0.0
         self.cam_pitch = 0.0
+        self.world_offset_z = 0.0 # Floating Origin Tracking
         self.rotation = 0.0
         self.packets = [] 
         self.active_procs_objs = [] 
@@ -398,6 +399,20 @@ class WiredEngine:
             entity.update()
 
         self.rotation += 0.5
+        
+        # Floating Origin: Re-center if too far
+        if self.cam_pos[2] < -100.0:
+            shift = self.cam_pos[2]
+            self.cam_pos[2] -= shift # Should become ~0
+            self.world_offset_z += shift
+            # Note: Entities track Global Z themselves, so they don't need manual shifting
+            # because they calculate Local Z = Global Z - World Offset.
+            # When we increase World Offset by X and Decrease Cam Pos by X,
+            # (Global - WorldOffset) increases by X.
+            # Local Z relative to cam?
+            # Cam is now 0. Arch was at -100 relative.
+            # New Arch Local = Global - (Offset - 100).
+            # It works out. Global is constant. Offset changes. Cam changes.
 
     def draw(self):
         self.post_process.begin() 
