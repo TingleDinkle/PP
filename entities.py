@@ -450,8 +450,8 @@ class PacketSystem(GameObject):
                 # Packets should appear near the camera? Or randomly in the "Active" tunnel zone?
                 # Let's start them at logical Z relative to camera.
                 current_global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
-                # Spawn ahead (more negative) and move towards us (positive)
-                p.base_global_z = current_global_z + random.uniform(-50, -150) 
+                # Spawn around player to zoom past
+                p.base_global_z = current_global_z + random.uniform(20, -20) 
                 
                 if p.protocol == 'TCP':
                     p.lane_x = -2.5
@@ -476,7 +476,7 @@ class PacketSystem(GameObject):
             if not hasattr(p, 'global_z'):
                 p.global_z = p.base_global_z
             
-            p.global_z += 0.4 # Move packet BACKWARDS (Positive Z) -> Incoming Traffic
+            p.global_z -= 0.6 # Move packet forward (slightly faster than player)
             
             # Keep packet alive if within reasonable distance
             # If it falls way behind camera, maybe respawn or kill?
@@ -573,7 +573,8 @@ class DigitalRain(GameObject):
                 drop['speed'] = random.uniform(0.1, 0.3)
                 drop['chars'] = [self._get_char() for _ in range(random.randint(5, 15))]
             
-            if random.random() < 0.1:
+            # Reduce flashing: Lower probability of character change
+            if random.random() < 0.02:
                 drop['chars'][random.randint(0, len(drop['chars'])-1)] = self._get_char()
 
     def draw(self):
@@ -725,8 +726,8 @@ class WifiVisualizer(GameObject):
         
         # Anchor to World Space
         # We want them to be "signs" along the road.
-        # Let's space them out every 20 units.
-        spacing = 20.0
+        # Let's space them out every 5 units for a dense wall.
+        spacing = 5.0
         
         # Current Global Camera Z
         global_cam_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
