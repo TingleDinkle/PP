@@ -127,6 +127,7 @@ class TextTexture:
         self.height = 0
         self._current_text = None 
         self._current_color = None 
+        self.last_used = time.time() # For Garbage Collection
 
     def update(self, text, color=(1.0, 1.0, 1.0, 1.0)): 
         if text == self._current_text and color == self._current_color:
@@ -174,6 +175,7 @@ class TextTexture:
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, self.width, self.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
 
     def draw(self, x, y, z, scale=0.02, yaw=0):
+        self.last_used = time.time() # Update usage time
         if self.width == 0 or self.height == 0: return 
         glPushMatrix()
         glTranslatef(x, y, z)
@@ -316,6 +318,7 @@ class WiredEngine:
         self.cam_pitch = 0.0
         self.world_offset_z = 0.0 # Floating Origin Tracking
         self.rotation = 0.0
+        self.last_texture_cleanup = time.time() # For Texture GC
         self.packets = [] 
         self.active_procs_objs = [] 
         self.start_time = time.time()
@@ -405,14 +408,26 @@ class WiredEngine:
             shift = self.cam_pos[2]
             self.cam_pos[2] -= shift # Should become ~0
             self.world_offset_z += shift
-            # Note: Entities track Global Z themselves, so they don't need manual shifting
-            # because they calculate Local Z = Global Z - World Offset.
-            # When we increase World Offset by X and Decrease Cam Pos by X,
-            # (Global - WorldOffset) increases by X.
-            # Local Z relative to cam?
-            # Cam is now 0. Arch was at -100 relative.
-            # New Arch Local = Global - (Offset - 100).
-            # It works out. Global is constant. Offset changes. Cam changes.
+        
+        # Periodic Texture Cleanup (Garbage Collection)
+        # Run every 10 seconds
+        if time.time() - self.last_texture_cleanup > 10.0:
+            self.last_texture_cleanup = time.time()
+            # Delete textures unused for > 60 seconds
+            threshold = time.time() - 60.0
+            
+            keys_to_delete = []
+            for key, tex in self.labels.items():
+                if tex.last_used < threshold:
+                    keys_to_delete.append(key)
+            
+            if keys_to_delete:
+                # print(f"GC: Cleaning {len(keys_to_delete)} old textures.")
+                for key in keys_to_delete:
+                    try:
+                        glDeleteTextures([self.labels[key].texture_id])
+                    except: pass
+                    del self.labels[key]
 
     def draw(self):
         self.post_process.begin() 
