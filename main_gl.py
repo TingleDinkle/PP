@@ -49,9 +49,16 @@ uniform float glitch_intensity;
 
 void main() {
     vec2 uv = gl_TexCoord[0].st;
+    // Simple Scanline (Fast)
     float scanline = sin(uv.y * 800.0) * 0.05;
+    
+    // Sample Texture
     vec3 col = texture2D(tex, uv).rgb;
+    
+    // Original Green/Cyan Tint
     col *= vec3(0.8, 1.1, 1.0);
+    
+    // Apply scanline
     col -= scanline;
     gl_FragColor = vec4(col, 1.0);
 }
@@ -184,6 +191,10 @@ class TextTexture:
         glTranslatef(-self.width / 2, -self.height / 2, 0)
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
+        
+        # RESET COLOR STATE TO WHITE to prevent tinting
+        glColor4f(1.0, 1.0, 1.0, 1.0)
+        
         glBegin(GL_QUADS)
         glTexCoord2f(0, 0); glVertex3f(0, 0, 0)
         glTexCoord2f(1, 0); glVertex3f(self.width, 0, 0)
