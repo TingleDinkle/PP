@@ -2,9 +2,7 @@
 
 **A Real-time Cyberpunk Data Visualizer**
 
-> "Present day, present time! Hahaha!"
-
-Navi is an immersive 3D data visualization tool inspired by *Serial Experiments Lain* and classic cyberpunk aesthetics. It renders your local system's activity—processes, network traffic, and WiFi signals—as a navigable, procedural 3D world (The Wired).
+Navi is an immersive 3D data visualization tool inspired by *Serial Experiments Lain* and classic cyberpunk aesthetics. It renders your local system's activity—processes, network traffic, and WiFi signals as a navigable, procedural 3D world (The Wired).
 
 Turn your boring task manager into a flight through cyberspace.
 
@@ -86,5 +84,6 @@ For developers interested in the code structure:
 
 This tool performs active packet sniffing on your local network interface for visualization purposes. Ensure you have permission to monitor the network you are connected to.
 
+WILL BE EXPANDED so don't expect the same version to be maintained as time goes by
 ---
 *Status: Connected.*
