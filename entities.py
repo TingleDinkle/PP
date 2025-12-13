@@ -125,6 +125,7 @@ class InfiniteTunnel(GameObject):
     def draw(self):
         # Use zone state if available, else default
         grid_col = getattr(self.engine, 'zone_state', {}).get('grid_color', COL_GRID)
+        zone_name = getattr(self.engine, 'zone_state', {}).get('name', 'SURFACE')
         
         if self.engine.monitor.disk_write:
             glColor3f(COL_WHITE[0], COL_WHITE[1], COL_WHITE[2])
@@ -134,6 +135,18 @@ class InfiniteTunnel(GameObject):
         cam_z = self.engine.cam_pos[2]
         current_seg_idx = math.floor(-cam_z / self.segment_length)
         
+        # OLD_NET Style: Points/Broken
+        if zone_name == 'OLD_NET':
+            glPointSize(2.0)
+            draw_mode = GL_POINTS
+        else:
+            draw_mode = GL_LINES
+            
+        # If OLD_NET, we might need to override the mesh drawing mode temporarily
+        # But VBOs have a fixed mode. 
+        # We can just draw the VBO with a different primitive mode if the VBO data allows,
+        # but GL_LINES data (pairs) drawn as GL_POINTS works fine (just draws vertices).
+        
         for i in range(-1, 6):
             seg_idx = current_seg_idx + i
             z_pos = -(seg_idx * self.segment_length)
@@ -141,15 +154,27 @@ class InfiniteTunnel(GameObject):
             glTranslatef(0, 0, z_pos)
             
             # Warp/Distort based on zone
-            zone_name = getattr(self.engine, 'zone_state', {}).get('name', 'SURFACE')
             if zone_name == 'DEEP_WEB':
-                 # Glitchy rotation for Deep Web
                  glRotatef(math.sin(z_pos * 0.1 + time.time()) * 5.0, 0, 0, 1)
             elif zone_name == 'BLACKWALL':
-                 # Chaos rotation
                  glRotatef(math.sin(z_pos * 0.5 + time.time() * 5.0) * 2.0, 1, 0, 0)
+            elif zone_name == 'OLD_NET':
+                 # Disintegrating
+                 glRotatef(time.time() * 10.0 + z_pos, 0, 0, 1)
+                 glScalef(1.0 + math.sin(time.time()*5)*0.1, 1.0, 1.0)
                  
-            self.mesh.draw()
+            # Draw
+            if zone_name == 'OLD_NET':
+                # Force draw as points
+                self.mesh.vbo.bind()
+                glEnableClientState(GL_VERTEX_ARRAY)
+                glVertexPointer(3, GL_FLOAT, 0, self.mesh.vbo)
+                glDrawArrays(GL_POINTS, 0, self.mesh.vertex_count)
+                glDisableClientState(GL_VERTEX_ARRAY)
+                self.mesh.vbo.unbind()
+            else:
+                self.mesh.draw()
+                
             glPopMatrix()
 
 class CyberArch(GameObject):
@@ -960,19 +985,21 @@ class Blackwall(GameObject):
 
     def draw(self):
         zone_name = getattr(self.engine, 'zone_state', {}).get('name')
-        # Visible if we are approaching it
-        if zone_name not in ['DEEP_WEB', 'BLACKWALL']: return
+        # Visible if we are approaching it or in Old Net (looking back?)
+        if zone_name not in ['DEEP_WEB', 'BLACKWALL', 'OLD_NET']: return
 
         global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
         wall_z = -4500.0 # The Blackwall Location
         local_wall_z = wall_z - getattr(self.engine, 'world_offset_z', 0.0)
         
-        # Don't draw if behind (we passed it?? impossible usually) or too far
-        if local_wall_z > self.engine.cam_pos[2] + 50 or local_wall_z < self.engine.cam_pos[2] - 500: 
-            # Draw closer if we are in blackwall zone, actually just standard vis check
-            if zone_name != 'BLACKWALL': # In deep web, only draw if close enough to see looming
+        # Don't draw if too far
+        # Increased visibility range to 2000 so it looms in the distance
+        if local_wall_z > self.engine.cam_pos[2] + 200 or local_wall_z < self.engine.cam_pos[2] - 2000: 
+             if zone_name != 'BLACKWALL': 
                  if local_wall_z < self.engine.cam_pos[2] - 300: return
 
+        breached = getattr(self.engine, 'blackwall_state', {}).get('breached', False)
+        
         glPushAttrib(GL_ENABLE_BIT)
         glDisable(GL_TEXTURE_2D)
         glEnable(GL_BLEND)
@@ -986,29 +1013,110 @@ class Blackwall(GameObject):
         glScalef(pulse, pulse, 1.0)
         
         # Red energetic color
-        glColor4f(1.0, 0.0, 0.0, 0.6 + math.sin(time.time()*20)*0.2)
+        alpha = 0.6 + math.sin(time.time()*20)*0.2
+        if breached:
+            glColor4f(0.2, 0.0, 0.0, 0.2) # Faded if breached
+        else:
+            glColor4f(1.0, 0.0, 0.0, alpha)
         
+        # If breached, open a hole? Or just fade it.
+        # Let's scale Y down if breached to simulate opening like a shutter
+        if breached:
+             glScalef(1.0, 0.1, 1.0)
+             
         self.grid_mesh.draw()
         
-        # Glitch layer
-        glPushMatrix()
-        glTranslatef(0, 0, 1.0) # Slightly in front
-        scale_g = 1.0 + math.sin(time.time() * 35.0) * 0.02
-        glScalef(scale_g, scale_g, 1.0)
-        glColor4f(1.0, 1.0, 1.0, 0.2)
-        self.grid_mesh.draw()
+        if not breached:
+            # Glitch layer
+            glPushMatrix()
+            glTranslatef(0, 0, 1.0) 
+            scale_g = 1.0 + math.sin(time.time() * 35.0) * 0.02
+            glScalef(scale_g, scale_g, 1.0)
+            glColor4f(1.0, 1.0, 1.0, 0.2)
+            self.grid_mesh.draw()
+            glPopMatrix()
+            
+            # Particles
+            glPointSize(4.0)
+            glBegin(GL_POINTS)
+            glColor4f(1.0, 0.2, 0.2, 0.8)
+            for i in range(20):
+                rx = random.uniform(-20, 20)
+                ry = random.uniform(-10, 10)
+                rz = random.uniform(0, 5)
+                glVertex3f(rx, ry, rz)
+            glEnd()
+
         glPopMatrix()
+        glPopAttrib()
+
+class AlienSwarm(GameObject):
+    def __init__(self, engine):
+        super().__init__(engine)
+        self.entities = []
+        for i in range(100):
+             self.entities.append({
+                 'offset': (random.uniform(-40, 40), random.uniform(-20, 20), random.uniform(-80, 50)),
+                 'speed': random.uniform(0.5, 4.0),
+                 'scale': random.uniform(0.5, 3.0),
+                 'axis': (random.random(), random.random(), random.random())
+             })
+
+    def draw(self):
+        if getattr(self.engine, 'zone_state', {}).get('name') != 'OLD_NET': return
+
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glLineWidth(1.0)
         
-        # Draw "Outside Forces" (Particles bouncing off)
-        glPointSize(4.0)
-        glBegin(GL_POINTS)
-        glColor4f(1.0, 0.2, 0.2, 0.8)
-        for i in range(20):
-            rx = random.uniform(-20, 20)
-            ry = random.uniform(-10, 10)
-            rz = random.uniform(0, 5)
-            glVertex3f(rx, ry, rz)
-        glEnd()
+        cam_z = self.engine.cam_pos[2]
+        global_z = cam_z + getattr(self.engine, 'world_offset_z', 0.0)
         
-        glPopMatrix()
+        # Center swarm around player Z approx
+        base_z = global_z
+        local_base_z = base_z - getattr(self.engine, 'world_offset_z', 0.0)
+
+        for e in self.entities:
+            ox, oy, oz = e['offset']
+            
+            # Animate
+            t = time.time()
+            dx = math.sin(t * e['speed'] + ox) * 10.0
+            dy = math.cos(t * e['speed'] * 0.5 + oy) * 10.0
+            
+            # Draw relative to camera Z
+            # Player moves negative Z.
+            # We want swarm to surround player.
+            px = ox + dx
+            py = oy + dy
+            # oz is random offset. 
+            pz = local_base_z + oz 
+            
+            # Culling: Positive Z is behind camera (since looking -Z).
+            # If pz is much larger than cam_z, it's behind.
+            if pz > cam_z + 50: continue 
+            
+            glPushMatrix()
+            glTranslatef(px, py, pz)
+            glRotatef(t * 100 * e['speed'], e['axis'][0], e['axis'][1], e['axis'][2])
+            glScalef(e['scale'], e['scale'], e['scale'])
+            
+            # Alien Color: Bright Gold/Static
+            glColor4f(1.0, 0.8, 0.2, 0.9) 
+            
+            # Draw spike shape (Tetrahedronish)
+            glBegin(GL_LINES)
+            verts = [
+                (0,1,0), (-1,-1,1), (1,-1,1), (0,-1,-1)
+            ]
+            # Connect all
+            for i in range(len(verts)):
+                for j in range(i+1, len(verts)):
+                    glVertex3f(*verts[i])
+                    glVertex3f(*verts[j])
+            glEnd()
+            
+            glPopMatrix()
+
         glPopAttrib()

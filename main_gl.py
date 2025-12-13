@@ -355,6 +355,7 @@ class WiredEngine:
         self.entities.append(entities.PacketSystem(self))
         self.entities.append(entities.CyberCity(self))
         self.entities.append(entities.Blackwall(self))
+        self.entities.append(entities.AlienSwarm(self))
         self.entities.append(entities.StatsWall(self))
         
         # Initial Zone State
@@ -364,6 +365,7 @@ class WiredEngine:
             'tint': (0.8, 1.1, 1.0),
             'distortion': 0.0
         }
+        self.blackwall_state = {'warnings': 0, 'breached': False, 'last_warning_time': 0, 'message': None}
         self.entities.append(entities.WifiVisualizer(self))
         
         # Matrix Rain (Left/Right)
@@ -403,18 +405,34 @@ class WiredEngine:
         right_x = math.cos(rad_yaw)
         right_z = math.sin(rad_yaw)
         
+        # Calculate proposed movement
+        dx = 0; dz = 0
         if keys[K_w]:
-            self.cam_pos[0] += forward_x * speed
-            self.cam_pos[2] += forward_z * speed
+            dx += forward_x * speed
+            dz += forward_z * speed
         if keys[K_s]:
-            self.cam_pos[0] -= forward_x * speed
-            self.cam_pos[2] -= forward_z * speed
+            dx -= forward_x * speed
+            dz -= forward_z * speed
         if keys[K_a]:
-            self.cam_pos[0] -= right_x * speed
-            self.cam_pos[2] -= right_z * speed
+            dx -= right_x * speed
+            dz -= right_z * speed
         if keys[K_d]:
-            self.cam_pos[0] += right_x * speed
-            self.cam_pos[2] += right_z * speed
+            dx += right_x * speed
+            dz += right_z * speed
+            
+        # Check Collision with Blackwall
+        next_z = self.cam_pos[2] + dz
+        global_z = next_z + self.world_offset_z
+        wall_z = -4500.0
+        
+        # If trying to go past wall (more negative than wall) and not breached
+        if not self.blackwall_state['breached'] and global_z < wall_z + 20:
+             # Allow moving BACK (increasing Z) but not forward
+             if dz < 0: 
+                 dz = 0 # Block forward Z movement
+        
+        self.cam_pos[0] += dx
+        self.cam_pos[2] += dz
             
         # Clamp movement to tunnel
         self.cam_pos[0] = max(-3.5, min(3.5, self.cam_pos[0]))
@@ -432,9 +450,52 @@ class WiredEngine:
 
         self.rotation += 0.5
         
-        # Zone Calc
+        # Zone Calc & Blackwall Logic
         global_z = self.cam_pos[2] + self.world_offset_z
+        wall_z = -4500.0
         
+        # Blackwall Interaction
+        if not self.blackwall_state['breached'] and global_z < -3500:
+             dist = global_z - wall_z 
+             
+             # Warning 1: 300 units out
+             if dist < 300 and self.blackwall_state['warnings'] == 0:
+                 self.blackwall_state['warnings'] = 1
+                 self.blackwall_state['message'] = "WARNING: CLASSIFIED DATA"
+                 self.blackwall_state['last_warning_time'] = time.time()
+                 self.cam_pos[2] += 20 # Slight push back
+                 
+             # Warning 2: 150 units out
+             elif dist < 150 and self.blackwall_state['warnings'] == 1:
+                  if time.time() - self.blackwall_state['last_warning_time'] > 1.0: # Faster cooldown
+                      self.blackwall_state['warnings'] = 2
+                      self.blackwall_state['message'] = "DANGER: LETHAL COUNTERMEASURES"
+                      self.blackwall_state['last_warning_time'] = time.time()
+                      # No pushback, just warning
+                  else:
+                      pass
+
+             # Warning 3: 50 units out
+             elif dist < 50 and self.blackwall_state['warnings'] == 2:
+                  if time.time() - self.blackwall_state['last_warning_time'] > 1.0:
+                      self.blackwall_state['warnings'] = 3
+                      self.blackwall_state['message'] = "CRITICAL: BREACH IMMINENT"
+                      self.blackwall_state['last_warning_time'] = time.time()
+                  else:
+                      pass
+             
+             # Final Breach Trigger (Shortly after Warning 3)
+             if self.blackwall_state['warnings'] == 3:
+                  if time.time() - self.blackwall_state['last_warning_time'] > 2.0:
+                       self.blackwall_state['breached'] = True
+                       self.blackwall_state['message'] = "SYSTEM FAILURE // BREACH DETECTED"
+
+             # Hard Barrier if not breached
+             if not self.blackwall_state['breached']:
+                 limit = wall_z + 10 - self.world_offset_z
+                 if self.cam_pos[2] < limit:
+                     self.cam_pos[2] = limit
+
         # Determine Zone
         if global_z > -1000:
             self.zone_state = {
@@ -457,12 +518,19 @@ class WiredEngine:
                 'tint': (0.7, 1.0, 0.7),
                 'distortion': 1.5 
             }
-        else:
+        elif global_z > -5500:
             self.zone_state = {
                 'name': 'BLACKWALL',
                 'grid_color': (0.8, 0.0, 0.0, 0.5), 
                 'tint': (1.2, 0.8, 0.8),
                 'distortion': 3.0 
+            }
+        else:
+            self.zone_state = {
+                'name': 'OLD_NET',
+                'grid_color': (0.8, 0.8, 0.9, 0.6), # Bright Static Grey
+                'tint': (0.6, 0.6, 0.7), 
+                'distortion': 4.0 
             }
 
         # Floating Origin: Re-center if too far
@@ -527,6 +595,39 @@ class WiredEngine:
         dist = self.zone_state.get('distortion', 0.0)
         
         self.post_process.end(t, self.glitch_level, tint, dist) 
+        
+        # UI Overlay for Blackwall Warnings
+        msg = self.blackwall_state.get('message')
+        if msg and not self.blackwall_state['breached']:
+             global_z = self.cam_pos[2] + self.world_offset_z
+             if global_z < -4200: # Only show when near
+                 glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity()
+                 gluOrtho2D(0, self.screen.get_width(), self.screen.get_height(), 0)
+                 glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity()
+                 glDisable(GL_DEPTH_TEST)
+                 glEnable(GL_BLEND)
+                 
+                 lbl = self.get_label(msg, (255, 50, 50))
+                 glEnable(GL_TEXTURE_2D)
+                 glBindTexture(GL_TEXTURE_2D, lbl.texture_id)
+                 
+                 x = (self.screen.get_width() - lbl.width) / 2
+                 y = (self.screen.get_height() / 2) - 100
+                 
+                 # Pulse
+                 alpha = 0.5 + math.sin(time.time()*15)*0.5
+                 glColor4f(1, 1, 1, alpha)
+                 
+                 glBegin(GL_QUADS)
+                 glTexCoord2f(0, 0); glVertex2f(x, y)
+                 glTexCoord2f(1, 0); glVertex2f(x + lbl.width, y)
+                 glTexCoord2f(1, 1); glVertex2f(x + lbl.width, y + lbl.height)
+                 glTexCoord2f(0, 1); glVertex2f(x, y + lbl.height)
+                 glEnd()
+                 
+                 glDisable(GL_TEXTURE_2D)
+                 glEnable(GL_DEPTH_TEST)
+                 glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix()
         
         pygame.display.flip()
 
