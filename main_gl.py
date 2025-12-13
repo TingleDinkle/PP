@@ -46,17 +46,23 @@ FRAGMENT_SHADER = """
 uniform sampler2D tex;
 uniform float time;
 uniform float glitch_intensity;
+uniform vec3 tint_color;
+uniform float distortion;
 
 void main() {
     vec2 uv = gl_TexCoord[0].st;
+    
+    // Horizontal distortion (glitch shake)
+    uv.x += sin(uv.y * 100.0 + time * 10.0) * distortion * 0.01;
+    
     // Simple Scanline (Fast)
     float scanline = sin(uv.y * 800.0) * 0.05;
     
     // Sample Texture
     vec3 col = texture2D(tex, uv).rgb;
     
-    // Original Green/Cyan Tint
-    col *= vec3(0.8, 1.1, 1.0);
+    // Apply Dynamic Tint
+    col *= tint_color;
     
     // Apply scanline
     col -= scanline;
@@ -100,7 +106,7 @@ class ShaderPostProcess:
             glViewport(0, 0, self.width, self.height)
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
 
-    def end(self, time_val, intensity):
+    def end(self, time_val, intensity, tint=(1.0, 1.0, 1.0), dist=0.0):
         if not self.program: return
         glBindFramebuffer(GL_FRAMEBUFFER, 0)
         glViewport(0, 0, self.width, self.height)
@@ -109,6 +115,8 @@ class ShaderPostProcess:
         glUniform1i(glGetUniformLocation(self.program, "tex"), 0)
         glUniform1f(glGetUniformLocation(self.program, "time"), time_val)
         glUniform1f(glGetUniformLocation(self.program, "glitch_intensity"), intensity)
+        glUniform3f(glGetUniformLocation(self.program, "tint_color"), tint[0], tint[1], tint[2])
+        glUniform1f(glGetUniformLocation(self.program, "distortion"), dist)
         
         glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity()
         glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity()
@@ -346,7 +354,16 @@ class WiredEngine:
         self.entities.append(entities.SatelliteSystem(self))
         self.entities.append(entities.PacketSystem(self))
         self.entities.append(entities.CyberCity(self))
+        self.entities.append(entities.Blackwall(self))
         self.entities.append(entities.StatsWall(self))
+        
+        # Initial Zone State
+        self.zone_state = {
+            'name': 'SURFACE',
+            'grid_color': COL_GRID,
+            'tint': (0.8, 1.1, 1.0),
+            'distortion': 0.0
+        }
         self.entities.append(entities.WifiVisualizer(self))
         
         # Matrix Rain (Left/Right)
@@ -373,7 +390,7 @@ class WiredEngine:
 
     def handle_input_continuous(self):
         keys = pygame.key.get_pressed()
-        speed = 0.5
+        speed = 2.0 # Increased for faster travel
         
         mdx, mdy = pygame.mouse.get_rel()
         self.cam_yaw += mdx * 0.1
@@ -415,6 +432,39 @@ class WiredEngine:
 
         self.rotation += 0.5
         
+        # Zone Calc
+        global_z = self.cam_pos[2] + self.world_offset_z
+        
+        # Determine Zone
+        if global_z > -1000:
+            self.zone_state = {
+                'name': 'SURFACE',
+                'grid_color': COL_GRID, 
+                'tint': (0.8, 1.1, 1.0),
+                'distortion': 0.0
+            }
+        elif global_z > -3000:
+            self.zone_state = {
+                'name': 'SPRAWL',
+                'grid_color': (0.6, 0.0, 0.8, 0.5), 
+                'tint': (0.9, 0.8, 1.1),
+                'distortion': 0.1
+            }
+        elif global_z > -4500:
+            self.zone_state = {
+                'name': 'DEEP_WEB',
+                'grid_color': (0.0, 0.8, 0.2, 0.5), 
+                'tint': (0.7, 1.0, 0.7),
+                'distortion': 1.5 
+            }
+        else:
+            self.zone_state = {
+                'name': 'BLACKWALL',
+                'grid_color': (0.8, 0.0, 0.0, 0.5), 
+                'tint': (1.2, 0.8, 0.8),
+                'distortion': 3.0 
+            }
+
         # Floating Origin: Re-center if too far
         if self.cam_pos[2] < -100.0:
             shift = self.cam_pos[2]
@@ -471,7 +521,12 @@ class WiredEngine:
             entity.draw()
         
         t = time.time() - self.start_time
-        self.post_process.end(t, self.glitch_level) 
+        
+        # Pass zone uniforms
+        tint = self.zone_state.get('tint', (1,1,1))
+        dist = self.zone_state.get('distortion', 0.0)
+        
+        self.post_process.end(t, self.glitch_level, tint, dist) 
         
         pygame.display.flip()
 

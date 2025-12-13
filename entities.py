@@ -123,26 +123,13 @@ class InfiniteTunnel(GameObject):
         return Mesh(verts, GL_LINES)
 
     def draw(self):
-        global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        # Use zone state if available, else default
+        grid_col = getattr(self.engine, 'zone_state', {}).get('grid_color', COL_GRID)
         
-        # Zone Logic
-        zone_cycle = 1000.0
-        zone_val = abs(global_z) % zone_cycle
-        
-        base_color = COL_GRID
-        if zone_val < 300: # Standard Blue
-            base_color = COL_GRID
-        elif zone_val < 600: # Purple
-            base_color = (0.6, 0.0, 0.8, 0.5)
-        elif zone_val < 800: # Green
-            base_color = (0.0, 0.8, 0.2, 0.5)
-        else: # Red
-            base_color = (0.8, 0.1, 0.1, 0.5)
-
         if self.engine.monitor.disk_write:
             glColor3f(COL_WHITE[0], COL_WHITE[1], COL_WHITE[2])
         else:
-            glColor4f(base_color[0], base_color[1], base_color[2], base_color[3])
+            glColor4f(grid_col[0], grid_col[1], grid_col[2], grid_col[3])
             
         cam_z = self.engine.cam_pos[2]
         current_seg_idx = math.floor(-cam_z / self.segment_length)
@@ -152,6 +139,16 @@ class InfiniteTunnel(GameObject):
             z_pos = -(seg_idx * self.segment_length)
             glPushMatrix()
             glTranslatef(0, 0, z_pos)
+            
+            # Warp/Distort based on zone
+            zone_name = getattr(self.engine, 'zone_state', {}).get('name', 'SURFACE')
+            if zone_name == 'DEEP_WEB':
+                 # Glitchy rotation for Deep Web
+                 glRotatef(math.sin(z_pos * 0.1 + time.time()) * 5.0, 0, 0, 1)
+            elif zone_name == 'BLACKWALL':
+                 # Chaos rotation
+                 glRotatef(math.sin(z_pos * 0.5 + time.time() * 5.0) * 2.0, 1, 0, 0)
+                 
             self.mesh.draw()
             glPopMatrix()
 
@@ -895,6 +892,10 @@ class CyberCity(GameObject):
         return buildings
 
     def draw(self):
+        # Only visible in the Sprawl
+        if getattr(self.engine, 'zone_state', {}).get('name') != 'SPRAWL':
+            return
+
         global_cam_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
         current_block = int(global_cam_z / self.block_size)
         
@@ -933,4 +934,81 @@ class CyberCity(GameObject):
                 # Fill bottom slightly to cover grid lines below? No, wireframe is cool.
                 glPopMatrix()
                 
+        glPopAttrib()
+
+class Blackwall(GameObject):
+    def __init__(self, engine):
+        super().__init__(engine)
+        self.grid_mesh = self._create_wall_grid()
+
+    def _create_wall_grid(self):
+        verts = []
+        size = 200.0 # Huge wall
+        steps = 50
+        step_size = size / steps
+        # Vertical lines
+        for i in range(steps + 1):
+            x = -size/2 + i * step_size
+            verts.append((x, -size/2, 0))
+            verts.append((x, size/2, 0))
+        # Horizontal lines
+        for i in range(steps + 1):
+            y = -size/2 + i * step_size
+            verts.append((-size/2, y, 0))
+            verts.append((size/2, y, 0))
+        return Mesh(verts, GL_LINES)
+
+    def draw(self):
+        zone_name = getattr(self.engine, 'zone_state', {}).get('name')
+        # Visible if we are approaching it
+        if zone_name not in ['DEEP_WEB', 'BLACKWALL']: return
+
+        global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        wall_z = -4500.0 # The Blackwall Location
+        local_wall_z = wall_z - getattr(self.engine, 'world_offset_z', 0.0)
+        
+        # Don't draw if behind (we passed it?? impossible usually) or too far
+        if local_wall_z > self.engine.cam_pos[2] + 50 or local_wall_z < self.engine.cam_pos[2] - 500: 
+            # Draw closer if we are in blackwall zone, actually just standard vis check
+            if zone_name != 'BLACKWALL': # In deep web, only draw if close enough to see looming
+                 if local_wall_z < self.engine.cam_pos[2] - 300: return
+
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glLineWidth(2.0)
+        
+        glPushMatrix()
+        glTranslatef(0, 0, local_wall_z)
+        
+        # Pulse scale
+        pulse = 1.0 + math.sin(time.time() * 10.0) * 0.01
+        glScalef(pulse, pulse, 1.0)
+        
+        # Red energetic color
+        glColor4f(1.0, 0.0, 0.0, 0.6 + math.sin(time.time()*20)*0.2)
+        
+        self.grid_mesh.draw()
+        
+        # Glitch layer
+        glPushMatrix()
+        glTranslatef(0, 0, 1.0) # Slightly in front
+        scale_g = 1.0 + math.sin(time.time() * 35.0) * 0.02
+        glScalef(scale_g, scale_g, 1.0)
+        glColor4f(1.0, 1.0, 1.0, 0.2)
+        self.grid_mesh.draw()
+        glPopMatrix()
+        
+        # Draw "Outside Forces" (Particles bouncing off)
+        glPointSize(4.0)
+        glBegin(GL_POINTS)
+        glColor4f(1.0, 0.2, 0.2, 0.8)
+        for i in range(20):
+            rx = random.uniform(-20, 20)
+            ry = random.uniform(-10, 10)
+            rz = random.uniform(0, 5)
+            glVertex3f(rx, ry, rz)
+        glEnd()
+        
+        glPopMatrix()
         glPopAttrib()
