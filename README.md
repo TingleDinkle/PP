@@ -1,63 +1,90 @@
 # Navi v22.0 // The Wired (OpenGL Engine)
-# Demo
-https://www.youtube.com/watch?v=YISqZbKRxtc
 
-A cybersecurity visualization tool inspired by "Serial Experiments Lain", rendering your system's data within an immersive OpenGL environment.
+**A Real-time Cyberpunk Data Visualizer**
 
-## Features
+> "Present day, present time! Hahaha!"
 
--   **3D OpenGL Rendering:** Hardware-accelerated visualization of your system's data.
--   **Visuals & Aesthetics:**
-    -   **"Data Highway" Packet Stream:** Live network packets visualized as flowing laser beams organized by protocol (TCP/UDP), with readable floating payloads.
-    -   **Digital Rain:** "Matrix"-style scrolling hexadecimal characters on the tunnel walls, powered by real captured packet data (Green/Red based on side).
-    -   **Holographic Hypercore:** A complex, multi-layered rotating 3D construct in the center representing the CPU, featuring gyroscopic rings and orbiting data text.
-    -   **System Bus Ring:** A neat orbital ring displaying active processes as glowing nodes with clear labels.
-    -   **GLSL Shader Post-Processing:** Retro "Cyberpunk" aesthetic with scanlines, CRT vignette, and subtle color grading.
--   **First-Person Navigation:** Explore the "Wired" with standard FPS controls (WASD + Mouse Look).
--   **Diegetic User Interface:**
-    -   **Transparent Tunnel:** Navigate a wireframe tunnel acting as your viewport.
-    -   **Wall Monitors:** Live CPU and RAM statistics displayed as holographic signs.
-    -   **WiFi Scanner:** Live detection of nearby WiFi networks, displayed as a list of glowing signal dots and SSIDs.
--   **Webcam "Ghost" Reflection:** Your real-time Canny-edge-detected webcam feed is mapped onto the far end of the tunnel.
--   **Performance Optimized:**
-    -   Texture pre-caching for smooth text rendering.
-    -   Batch rendering for particle systems.
-    -   Framerate locking (60 FPS) for buttery smooth animations.
+Navi is an immersive 3D data visualization tool inspired by *Serial Experiments Lain* and classic cyberpunk aesthetics. It renders your local system's activity—processes, network traffic, and WiFi signals—as a navigable, procedural 3D world (The Wired).
 
-## Prerequisites
+Turn your boring task manager into a flight through cyberspace.
 
--   Python 3.7+
--   A webcam 
--   Npcap (Required for Scapy on Windows)
+##  Visuals & Features
 
-## Setup
+The application renders a continuous "infinite tunnel" representing the depth of the network. As you travel deeper, the environment changes:
 
-1.  **Create a virtual environment:**
+*   **Zone System:**
+    *   **Surface:** Clean grid, standard monitoring.
+    *   **The Sprawl:** Increased density, distortion.
+    *   **Deep Web:** Green-tinted, heavy glitch artifacts.
+    *   **The Blackwall:** Red warning visuals, firewall boundaries.
+    *   **Old Net:** High distortion, static, monochrome.
+
+*   **Data Entities:**
+    *   **Data Highway:** Live network packets (sniffed via `scapy`) rendered as laser beams. Colors indicate protocol (TCP vs UDP).
+    *   **Process Orbitals:** Running system processes (`psutil`) visualized as satellites orbiting the central core.
+    *   **WiFi Signals:** Nearby networks (`netsh`) detected and displayed as floating signal beacons.
+    *   **Digital Rain:** Real-time hex dumps of packet payloads scrolling on the tunnel walls.
+    *   **Holographic Hypercore:** A central rotating construct representing your CPU/System state.
+
+*   **Aesthetics:**
+    *   **Retro-Cyberpunk Shader:** Custom GLSL post-processing for scanlines, chromatic aberration, and CRT distortion.
+    *   **Webcam Integration:** "Ghost" reflection of the user mapped onto the far end of the tunnel using Canny edge detection.
+
+##  System Requirements
+
+*   **OS:** Windows 10 / 11 (Required for `netsh` WiFi scanning and Npcap support).
+*   **Python:** 3.7+
+*   **Hardware:** Dedicated GPU recommended for smooth 60fps OpenGL rendering.
+*   **Network Driver:** **[Npcap](https://npcap.com/)** (Install with "WinPcap API-compatible mode" checked). This is *mandatory* for packet sniffing to work.
+
+##  Installation
+
+1.  **Clone the repository:**
     ```bash
-    python -m venv venv
+    git clone <your-repo-url>
+    cd <repo-name>
     ```
 
-2.  **Activate the virtual environment:**
-    -   Windows: `venv\Scripts\activate`
-    -   Mac/Linux: `source venv/bin/activate`
+2.  **Create a virtual environment (Recommended):**
+    ```bash
+    python -m venv venv
+    .\venv\Scripts\activate
+    ```
 
 3.  **Install dependencies:**
     ```bash
-    pip install pygame opencv-python mediapipe scapy numpy PyOpenGL PyOpenGL_accelerate pyperclip psutil
+    pip install pygame opencv-python scapy numpy PyOpenGL PyOpenGL_accelerate psutil
     ```
-    *(Note: Scapy requires Npcap on Windows for full functionality.)*
 
-## Usage
+##  Usage
 
-Run the OpenGL-powered main script:
+1.  Ensure you have installed **Npcap**.
+2.  Run the main engine:
+    ```bash
+    python main_gl.py
+    ```
 
-```bash
-python main_gl.py
-```
+##  Controls
 
-## Controls
+Navigate "The Wired" using standard First-Person controls:
 
--   **Mouse:** Look around
--   **W / S:** Move Forward / Backward
--   **A / D:** Strafe Left / Right
--   **ESC**: Quit the application.
+*   **W / S:** Fly Forward / Backward
+*   **A / D:** Strafe Left / Right
+*   **Mouse:** Look around
+*   **ESC:** Jack out (Quit)
+
+##  Architecture
+
+For developers interested in the code structure:
+
+*   **`main_gl.py`**: The core engine. Handles the Pygame/OpenGL initialization, main game loop, GLSL shaders, and the `SystemMonitor` thread.
+*   **`entities.py`**: Contains all visual classes (`PacketSystem`, `CyberCity`, `DigitalRain`, etc.) that render the 3D objects.
+*   **`protocol.py`**: Runs a background thread using `scapy` to sniff network packets and queue them for the visualizer.
+*   **`wifi_scanner.py`**: A Windows-specific module that wraps `netsh wlan` commands to discover local WiFi networks.
+
+##  Disclaimer
+
+This tool performs active packet sniffing on your local network interface for visualization purposes. Ensure you have permission to monitor the network you are connected to.
+
+---
+*Status: Connected.*
