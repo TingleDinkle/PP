@@ -123,10 +123,26 @@ class InfiniteTunnel(GameObject):
         return Mesh(verts, GL_LINES)
 
     def draw(self):
+        global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        
+        # Zone Logic
+        zone_cycle = 1000.0
+        zone_val = abs(global_z) % zone_cycle
+        
+        base_color = COL_GRID
+        if zone_val < 300: # Standard Blue
+            base_color = COL_GRID
+        elif zone_val < 600: # Purple
+            base_color = (0.6, 0.0, 0.8, 0.5)
+        elif zone_val < 800: # Green
+            base_color = (0.0, 0.8, 0.2, 0.5)
+        else: # Red
+            base_color = (0.8, 0.1, 0.1, 0.5)
+
         if self.engine.monitor.disk_write:
             glColor3f(COL_WHITE[0], COL_WHITE[1], COL_WHITE[2])
         else:
-            glColor3f(COL_GRID[0], COL_GRID[1], COL_GRID[2])
+            glColor4f(base_color[0], base_color[1], base_color[2], base_color[3])
             
         cam_z = self.engine.cam_pos[2]
         current_seg_idx = math.floor(-cam_z / self.segment_length)
@@ -816,3 +832,105 @@ class IntroOverlay(GameObject):
             glMatrixMode(GL_MODELVIEW)
             glPopMatrix()
             glEnable(GL_DEPTH_TEST)
+
+class CyberCity(GameObject):
+    def __init__(self, engine):
+        super().__init__(engine)
+        self.block_size = 20.0 # Size of a city block
+        self.buildings = {} # Key: (block_z_index, side), Value: List of (x, height, width, depth)
+        self.cube_mesh = self._create_cube_mesh()
+
+    def _create_cube_mesh(self):
+        # Unit cube centered at base (0,0,0) to (1,1,1) ? 
+        # Let's do centered at 0,0,0 with size 1
+        verts = [
+            # Bottom
+            (-0.5, 0, -0.5), (0.5, 0, -0.5), (0.5, 0, 0.5), (-0.5, 0, 0.5),
+            # Top
+            (-0.5, 1, -0.5), (0.5, 1, -0.5), (0.5, 1, 0.5), (-0.5, 1, 0.5),
+            # Verticals
+            (-0.5, 0, -0.5), (-0.5, 1, -0.5),
+            (0.5, 0, -0.5), (0.5, 1, -0.5),
+            (0.5, 0, 0.5), (0.5, 1, 0.5),
+            (-0.5, 0, 0.5), (-0.5, 1, 0.5)
+        ]
+        # Wireframe indices (lines)
+        lines = []
+        # Bottom loop
+        lines.extend([0,1, 1,2, 2,3, 3,0])
+        # Top loop
+        lines.extend([4,5, 5,6, 6,7, 7,4])
+        # Vertical connectors
+        lines.extend([0,4, 1,5, 2,6, 3,7])
+        
+        # Flatten
+        flat_verts = []
+        for i in lines:
+            flat_verts.append(verts[i])
+            
+        return Mesh(flat_verts, GL_LINES)
+
+    def _generate_block(self, index):
+        random.seed(index)
+        buildings = []
+        
+        # Left side (-X)
+        for i in range(random.randint(2, 5)):
+            x = -random.uniform(6.0, 15.0)
+            z_offset = random.uniform(-self.block_size/2, self.block_size/2)
+            w = random.uniform(2.0, 5.0)
+            d = random.uniform(2.0, 5.0)
+            h = random.uniform(2.0, 15.0) # Height
+            buildings.append((x, z_offset, w, d, h, COL_CYAN))
+
+        # Right side (+X)
+        for i in range(random.randint(2, 5)):
+            x = random.uniform(6.0, 15.0)
+            z_offset = random.uniform(-self.block_size/2, self.block_size/2)
+            w = random.uniform(2.0, 5.0)
+            d = random.uniform(2.0, 5.0)
+            h = random.uniform(2.0, 15.0)
+            buildings.append((x, z_offset, w, d, h, (1.0, 0.0, 1.0, 1.0))) # Purple/Magenta
+            
+        return buildings
+
+    def draw(self):
+        global_cam_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        current_block = int(global_cam_z / self.block_size)
+        
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glLineWidth(1.0)
+        
+        for i in range(current_block - 2, current_block + 5):
+            if i not in self.buildings:
+                self.buildings[i] = self._generate_block(i)
+                # Cleanup old
+                if i - 10 in self.buildings:
+                    del self.buildings[i-10]
+            
+            block_base_z = i * self.block_size
+            local_base_z = block_base_z - getattr(self.engine, 'world_offset_z', 0.0)
+            
+            for (x, z_off, w, d, h, col) in self.buildings[i]:
+                # Visibility check
+                b_local_z = local_base_z + z_off
+                if b_local_z > self.engine.cam_pos[2] + 10 or b_local_z < self.engine.cam_pos[2] - 120:
+                    continue
+                    
+                glPushMatrix()
+                glTranslatef(x, -5.0, b_local_z) # Ground level approx -5
+                glScalef(w, h, d)
+                
+                # Distance fade
+                dist = abs(self.engine.cam_pos[2] - b_local_z)
+                alpha = max(0, min(0.6, 1.0 - (dist / 100.0)))
+                
+                glColor4f(col[0], col[1], col[2], alpha)
+                self.cube_mesh.draw()
+                
+                # Fill bottom slightly to cover grid lines below? No, wireframe is cool.
+                glPopMatrix()
+                
+        glPopAttrib()

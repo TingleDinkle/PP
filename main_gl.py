@@ -345,6 +345,7 @@ class WiredEngine:
         self.entities.append(entities.Hypercore(self))
         self.entities.append(entities.SatelliteSystem(self))
         self.entities.append(entities.PacketSystem(self))
+        self.entities.append(entities.CyberCity(self))
         self.entities.append(entities.StatsWall(self))
         self.entities.append(entities.WifiVisualizer(self))
         
