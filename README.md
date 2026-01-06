@@ -39,8 +39,8 @@ The application renders a continuous "infinite tunnel" representing the depth of
 
 1.  **Clone the repository:**
     ```bash
-    git clone <your-repo-url>
-    cd <repo-name>
+    git clone https://github.com/TingleDinkle/PP.git
+    cd PP
     ```
 
 2.  **Create a virtual environment (Recommended):**
