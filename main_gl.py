@@ -556,7 +556,7 @@ class WiredEngine:
                  self.blackwall_state['warnings'] = 1
                  self.blackwall_state['message'] = "WARNING: CLASSIFIED DATA"
                  self.blackwall_state['last_warning_time'] = time.time()
-                 self.cam_pos[2] += 20 
+                 # Removed auto-push
              elif dist < 150 and self.blackwall_state['warnings'] == 1:
                   if time.time() - self.blackwall_state['last_warning_time'] > 1.0:
                       self.blackwall_state['warnings'] = 2

@@ -899,58 +899,129 @@ class CyberCity(GameObject):
         glPopAttrib()
 
 class Blackwall(GameObject):
+    """
+    The Firewall Boundary. A complex, morphing hyper-structure.
+    """
     def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
-        self.grid_mesh = self._create_wall_grid()
+        self.primary_mesh = self._generate_hyper_lattice(radius=50.0, density=40)
+        self.core_mesh = self._generate_polyhedron(size=20.0)
+        self.glitch_timer = 0.0
+        self.glitch_state = 0.0
 
-    def _create_wall_grid(self) -> Mesh:
+    def _generate_hyper_lattice(self, radius: float, density: int) -> Mesh:
+        """Generates a dense, circular grid lattice."""
         verts = []
-        size = 200.0
-        steps = 50
-        step_size = size / steps
-        for i in range(steps + 1):
-            x = -size/2 + i * step_size
-            verts.append((x, -size/2, 0)); verts.append((x, size/2, 0))
-        for i in range(steps + 1):
-            y = -size/2 + i * step_size
-            verts.append((-size/2, y, 0)); verts.append((size/2, y, 0))
+        for i in range(density):
+            angle = (i / density) * 2 * math.pi
+            # Outer Ring
+            x = math.cos(angle) * radius
+            y = math.sin(angle) * radius
+            verts.extend([(x, y, 0), (x*0.9, y*0.9, 5)])
+            
+            # Cross lattice
+            if i % 2 == 0:
+                verts.extend([(x, y, 0), (-x, -y, 0)])
+                
+        # Concentric Rings
+        for r in [radius * 0.5, radius * 0.75, radius]:
+            for i in range(density):
+                a1 = (i / density) * 2 * math.pi
+                a2 = ((i+1) / density) * 2 * math.pi
+                verts.extend([
+                    (math.cos(a1)*r, math.sin(a1)*r, 0),
+                    (math.cos(a2)*r, math.sin(a2)*r, 0)
+                ])
+        return Mesh(verts, GL_LINES)
+
+    def _generate_polyhedron(self, size: float) -> Mesh:
+        """Generates a jagged core structure."""
+        verts = []
+        # Octahedron-ish
+        axis = [
+            (size, 0, 0), (-size, 0, 0),
+            (0, size, 0), (0, -size, 0),
+            (0, 0, size), (0, 0, -size)
+        ]
+        # Connect everything to everything for a chaotic core
+        for i in range(len(axis)):
+            for j in range(i+1, len(axis)):
+                verts.extend([axis[i], axis[j]])
         return Mesh(verts, GL_LINES)
 
     def draw(self):
         zone_name = self.engine.zone_state.get('name')
         if zone_name not in ['DEEP_WEB', 'BLACKWALL', 'OLD_NET']: return
-        global_z = self.engine.cam_pos[2] + self.engine.world_offset_z
         
-        # Use config or consistent logic for wall position?
-        # Original was -4500. config has ZONE_THRESHOLDS['DEEP_WEB'] = -4500
+        # Position logic
         wall_z = config.ZONE_THRESHOLDS['DEEP_WEB'] 
-        
         local_wall_z = wall_z - self.engine.world_offset_z
-        if local_wall_z > self.engine.cam_pos[2] + 200 or local_wall_z < self.engine.cam_pos[2] - config.CULL_DISTANCE * 2: 
-             if zone_name != 'BLACKWALL' and local_wall_z < self.engine.cam_pos[2] - 300: return
+        
+        # Culling (Keep visible for longer)
+        if local_wall_z > self.engine.cam_pos[2] + 200 or local_wall_z < self.engine.cam_pos[2] - config.CULL_DISTANCE * 3: 
+             return
 
         breached = self.engine.blackwall_state.get('breached', False)
+        t = time.time()
         
+        # Calculate Morphing parameters
+        if breached:
+            # Chaos Mode
+            pulse = 1.0 + math.sin(t * 20.0) * 0.5
+            rotate_speed = t * 100.0
+            scale_factor = 4.0 + math.sin(t * 5.0) # Massive expansion
+            color = (1.0, 0.0, 0.0, 0.8) if int(t*10)%2==0 else (0.0, 0.0, 0.0, 1.0)
+        else:
+            # Warning Mode
+            pulse = 1.0 + math.sin(t * 2.0) * 0.05
+            rotate_speed = t * 10.0
+            scale_factor = 1.0
+            color = (1.0, 0.0, 0.0, 0.6 + math.sin(t)*0.2)
+
+        # Draw
         glPushAttrib(GL_ENABLE_BIT)
         glDisable(GL_TEXTURE_2D)
         glEnable(GL_BLEND)
-        glLineWidth(2.0)
+        glLineWidth(2.0 if breached else 1.5)
+        
         glPushMatrix()
         glTranslatef(0, 0, local_wall_z)
-        pulse = 1.0 + math.sin(time.time() * 10.0) * 0.01
+        
+        # Main Scale
+        glScalef(scale_factor, scale_factor, scale_factor)
+        
+        # --- Layer 1: Hyper Lattice (Rotating) ---
+        glPushMatrix()
+        glRotatef(rotate_speed, 0, 0, 1)
         glScalef(pulse, pulse, 1.0)
-        alpha = 0.6 + math.sin(time.time()*20)*0.2
-        if breached: glColor4f(0.2, 0.0, 0.0, 0.2); glScalef(1.0, 0.1, 1.0)
-        else: glColor4f(1.0, 0.0, 0.0, alpha)
-        self.grid_mesh.draw()
-        if not breached:
-            glPushMatrix()
-            glTranslatef(0, 0, 1.0) 
-            scale_g = 1.0 + math.sin(time.time() * 35.0) * 0.02
-            glScalef(scale_g, scale_g, 1.0)
-            glColor4f(1.0, 1.0, 1.0, 0.2)
-            self.grid_mesh.draw()
-            glPopMatrix()
+        glColor4f(*color)
+        self.primary_mesh.draw()
+        glPopMatrix()
+        
+        # --- Layer 2: Counter-Rotating Lattice ---
+        glPushMatrix()
+        glRotatef(-rotate_speed * 0.5, 0, 0, 1)
+        glScalef(pulse * 0.8, pulse * 0.8, 1.0)
+        glColor4f(color[0], 0.2, 0.2, 0.4)
+        self.primary_mesh.draw()
+        glPopMatrix()
+
+        # --- Layer 3: The Core (Chaos Geometry) ---
+        glPushMatrix()
+        # Random axis rotation
+        glRotatef(t * 50, math.sin(t), math.cos(t), math.sin(t*0.5))
+        glScalef(0.5, 0.5, 0.5)
+        
+        if breached:
+             # Core explodes outward
+             glScalef(t % 5, t % 5, t % 5) 
+             glColor4f(1.0, 1.0, 1.0, 0.8)
+        else:
+             glColor4f(1.0, 0.0, 0.0, 0.9)
+             
+        self.core_mesh.draw()
+        glPopMatrix()
+
         glPopMatrix()
         glPopAttrib()
 
