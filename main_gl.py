@@ -424,6 +424,7 @@ class WiredEngine:
             entities.WifiVisualizer(self),
             entities.DigitalRain(self, side='left', color=config.COL_HEX),
             entities.DigitalRain(self, side='right', color=config.COL_RED),
+            entities.CustomModel(self),
             entities.IntroOverlay(self)
         ]
         

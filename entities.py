@@ -12,6 +12,8 @@ from OpenGL.arrays import vbo
 
 import config
 
+import model_loader
+
 if TYPE_CHECKING:
     from main_gl import WiredEngine
 
@@ -1140,6 +1142,57 @@ class WifiVisualizer(GameObject):
                 glTranslatef(0.2, -0.05, 0)
                 ssid_lbl.draw(0, 0, 0, 0.015)
                 glPopMatrix()
+        glPopAttrib()
+
+class CustomModel(GameObject):
+    """
+    Loads and renders a user-provided GLB model as a wireframe artifact.
+    """
+    def __init__(self, engine: 'WiredEngine'):
+        super().__init__(engine)
+        self.mesh = None
+        self.loaded = False
+        self._load_model()
+
+    def _load_model(self):
+        # Try to load 'model.glb'
+        print("Attempting to load 'model.glb'...")
+        verts = model_loader.load_glb_as_lines("model.glb", scale=5.0)
+        if verts:
+            self.mesh = Mesh(verts, GL_LINES)
+            self.loaded = True
+        else:
+            print("No 'model.glb' found or failed to load. CustomModel will be invisible.")
+
+    def draw(self):
+        if not self.loaded or not self.mesh: return
+        
+        # Draw at a specific location
+        # Let's put it floating in the Sprawl/Deep Web transition
+        pos_z = -150.0
+        local_z = pos_z - self.engine.world_offset_z
+        
+        # Culling
+        if abs(local_z - self.engine.cam_pos[2]) > config.CULL_DISTANCE: return
+        
+        glPushAttrib(GL_ENABLE_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glLineWidth(1.0)
+        
+        glPushMatrix()
+        glTranslatef(0, 0, local_z)
+        
+        # Rotate
+        glRotatef(time.time() * 10.0, 0, 1, 0)
+        glRotatef(math.sin(time.time() * 0.5) * 10.0, 1, 0, 0)
+        
+        # Color: Golden Artifact
+        glColor4f(1.0, 0.8, 0.0, 0.8)
+        
+        self.mesh.draw()
+        
+        glPopMatrix()
         glPopAttrib()
 
 class IntroOverlay(GameObject):
