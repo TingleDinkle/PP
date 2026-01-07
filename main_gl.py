@@ -1,41 +1,26 @@
+import math
+import queue
+import random
+import threading
+import time
+import collections
+from typing import Dict, List, Tuple, Optional, Any
+
+import cv2
+import numpy as np
+import psutil
 import pygame
 from pygame.locals import *
 from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GL.shaders import compileProgram, compileShader
-import cv2
-import numpy as np
-import time
-import math
-import random
-import queue
-import psutil
-import threading
-import collections
-import wifi_scanner
+
+# Local Imports
+import config
+import entities
 import protocol
-import entities 
 import sounds
-
-# --- Constants ---
-WIN_WIDTH = 1280
-WIN_HEIGHT = 720
-TUNNEL_DEPTH = 40.0 
-
-# Colors
-COL_CYAN = (0.0, 1.0, 1.0, 1.0)
-COL_RED = (1.0, 0.2, 0.2, 1.0)
-COL_GRID = (0.0, 0.15, 0.3, 0.4) 
-COL_DARK = (0.02, 0.02, 0.04, 1.0)
-COL_TEXT = (0.8, 0.8, 0.8, 1.0)
-COL_GHOST = (0.2, 1.0, 0.2, 0.8) 
-COL_WHITE = (1.0, 1.0, 1.0, 1.0)
-COL_YELLOW = (1.0, 1.0, 0.0, 1.0)
-COL_HEX = (0.0, 0.6, 0.0, 1.0) 
-
-
-
-
+import wifi_scanner
 
 # --- GLSL Shaders ---
 VS_BASE = """
@@ -85,24 +70,25 @@ void main() {
 """
 
 class SimpleFramebuffer:
-    def __init__(self, width, height):
+    """Helper class for OpenGL Framebuffer Object (FBO) management."""
+    def __init__(self, width: int, height: int):
         self.width = width
         self.height = height
         self.fbo = glGenFramebuffers(1)
         self.tex = glGenTextures(1)
         self.rbo = glGenRenderbuffers(1)
         
-        # Texture
+        # Texture Attachment
         glBindTexture(GL_TEXTURE_2D, self.tex)
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, None)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR)
         
-        # Depth Buffer (Needed for 3D)
+        # Depth Buffer Attachment
         glBindRenderbuffer(GL_RENDERBUFFER, self.rbo)
         glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, width, height)
         
-        # Attach
+        # Link
         glBindFramebuffer(GL_FRAMEBUFFER, self.fbo)
         glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, self.tex, 0)
         glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, self.rbo)
@@ -117,7 +103,8 @@ class SimpleFramebuffer:
         glBindFramebuffer(GL_FRAMEBUFFER, 0)
 
 class PostProcess:
-    def __init__(self, width, height):
+    """Manages the full-screen post-processing shader pipeline."""
+    def __init__(self, width: int, height: int):
         self.fbo = SimpleFramebuffer(width, height)
         self.width = width
         self.height = height
@@ -127,28 +114,23 @@ class PostProcess:
                 compileShader(FS_COMPOSITE, GL_FRAGMENT_SHADER)
             )
         except Exception as e:
-            print(f"Shader Fail: {e}")
+            print(f"Shader Compilation Failed: {e}")
             self.program = 0
 
     def begin(self):
         self.fbo.bind()
 
-    def end(self, time_val, glitch, tint, invert):
-        # Unbind to draw to screen
+    def end(self, time_val: float, glitch: float, tint: Tuple[float, float, float], invert: bool):
+        # Draw FBO texture to screen with shader
         glBindFramebuffer(GL_FRAMEBUFFER, 0)
         glViewport(0, 0, self.width, self.height)
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
         
         if not self.program:
-            # Fallback if shader failed
+            # Fallback: Fixed Function
             glEnable(GL_TEXTURE_2D)
             glBindTexture(GL_TEXTURE_2D, self.fbo.tex)
-            glBegin(GL_QUADS)
-            glTexCoord2f(0, 0); glVertex2f(-1, -1)
-            glTexCoord2f(1, 0); glVertex2f(1, -1)
-            glTexCoord2f(1, 1); glVertex2f(1, 1) 
-            glTexCoord2f(0, 1); glVertex2f(-1, 1) 
-            glEnd()
+            self._draw_quad()
             return
 
         glUseProgram(self.program)
@@ -165,56 +147,61 @@ class PostProcess:
         glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity()
         glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity()
         
+        self._draw_quad()
+        
+        glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW)
+        glUseProgram(0)
+        glEnable(GL_DEPTH_TEST)
+
+    def _draw_quad(self):
         glBegin(GL_QUADS)
         glTexCoord2f(0, 0); glVertex2f(-1, -1)
         glTexCoord2f(1, 0); glVertex2f(1, -1)
         glTexCoord2f(1, 1); glVertex2f(1, 1) 
         glTexCoord2f(0, 1); glVertex2f(-1, 1) 
         glEnd()
-        
-        glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW)
-        glUseProgram(0)
-        glEnable(GL_DEPTH_TEST)
 
 class TextTexture:
-    def __init__(self, font):
+    """Manages dynamic text rendering to OpenGL Textures."""
+    def __init__(self, font: pygame.font.Font):
         self.font = font
         self.texture_id = glGenTextures(1)
-        self.width = 0; self.height = 0
-        self._current_text = None; self._current_color = None
+        self.width = 0
+        self.height = 0
+        self._current_text = None
+        self._current_color = None
         self.last_used = time.time()
 
-    def update(self, text, color=(1.0, 1.0, 1.0, 1.0)): 
-        if text == self._current_text and color == self._current_color: return 
-        self._current_text = text; self._current_color = color
-
-        # Handle both float (0-1) and int (0-255) inputs
-        is_float = False
-        for c in color[:3]:
-            if isinstance(c, float) and c <= 1.0: 
-                is_float = True # Assume float if any component is float <= 1.0? 
-                # Risk: (0,0,0) int is <= 1.0. 
-                # Better: check if ANY component > 1.0
+    def update(self, text: str, color: config.Color = config.COL_WHITE): 
+        if text == self._current_text and color == self._current_color:
+            return 
         
-        max_val = max(color[:3])
-        if max_val > 1.0:
-            # Assume 0-255
-            c255 = list(color[:3])
-            if len(color) == 4: c255.append(color[3])
-            else: c255.append(255)
-            # Ensure int
-            c255 = [int(c) for c in c255]
+        self._current_text = text
+        self._current_color = color
+
+        # Robust Float (0.0-1.0) to Int (0-255) conversion
+        # Pygame requires 0-255 integers
+        c255 = []
+        for c in color[:3]:
+            # Clamp and scale
+            val = int(max(0.0, min(1.0, c)) * 255)
+            c255.append(val)
+        
+        # Handle Alpha if present
+        if len(color) == 4:
+            c255.append(int(max(0.0, min(1.0, color[3])) * 255))
         else:
-            # Assume 0-1
-            c255 = [int(c * 255) for c in color[:3]]
-            if len(color) == 4: c255.append(int(color[3] * 255))
-            else: c255.append(255)
+            c255.append(255)
 
         surf = self.font.render(text, True, c255)
+        
+        # Create RGBA Surface
         new_surf = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
         new_surf.fill((0, 0, 0, 0)) 
         new_surf.blit(surf, (0, 0)) 
-        self.width = new_surf.get_width(); self.height = new_surf.get_height()
+        
+        self.width = new_surf.get_width()
+        self.height = new_surf.get_height()
 
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR)
@@ -222,37 +209,51 @@ class TextTexture:
         data = pygame.image.tostring(new_surf, "RGBA", True) 
         glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, self.width, self.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data)
 
-    def draw(self, x, y, z, scale=0.02, yaw=0):
+    def draw(self, x: float, y: float, z: float, scale: float = 0.02, yaw: float = 0):
         self.last_used = time.time()
         if self.width == 0: return 
+        
         glPushMatrix()
         glTranslatef(x, y, z)
         glRotatef(yaw, 0, 1, 0)
         glScalef(scale, scale, 1)
         glTranslatef(-self.width / 2, -self.height / 2, 0)
+        
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
-        glColor4f(1.0, 1.0, 1.0, 1.0)
+        glColor4f(1.0, 1.0, 1.0, 1.0) # Tint white to keep original font color
+        
         glBegin(GL_QUADS)
         glTexCoord2f(0, 0); glVertex3f(0, 0, 0)
         glTexCoord2f(1, 0); glVertex3f(self.width, 0, 0)
         glTexCoord2f(1, 1); glVertex3f(self.width, self.height, 0)
         glTexCoord2f(0, 1); glVertex3f(0, self.height, 0)
         glEnd()
+        
         glDisable(GL_TEXTURE_2D)
         glPopMatrix()
 
 class WebcamTexture:
+    """Manages webcam capture and Canny Edge Detection visualization."""
     def __init__(self):
         self.texture_id = glGenTextures(1)
         
     def update(self, frame):
+        if frame is None: return
+        # Downscale for performance & style
         small = cv2.resize(frame, (320, 240))
         gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
         edges = cv2.Canny(gray, 50, 150)
+        
+        # Create Ghostly Green Overlay
         rgba = np.zeros((240, 320, 4), dtype=np.uint8) 
-        rgba[edges > 0] = [int(COL_GHOST[0]*255), int(COL_GHOST[1]*255), int(COL_GHOST[2]*255), int(COL_GHOST[3]*255)] 
+        
+        # Apply color to edges
+        r, g, b, a = [int(c * 255) for c in config.COL_GHOST]
+        rgba[edges > 0] = [r, g, b, a]
+        
         rgba = cv2.flip(rgba, 0)
+        
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST)
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST)
@@ -262,31 +263,39 @@ class WebcamTexture:
         glBindTexture(GL_TEXTURE_2D, self.texture_id)
 
 class SystemMonitor(threading.Thread):
+    """Background thread for psutil metrics."""
     def __init__(self):
         super().__init__()
-        self.cpu = 0; self.ram = 0; self.disk_write = False
+        self.cpu = 0
+        self.ram = 0
+        self.disk_write = False
         self.processes = []
-        self.running = True; self.daemon = True
+        self.running = True
+        self.daemon = True
 
-    def get_port_color(self, pid):
+    def get_port_color(self, pid: int) -> config.Color:
         try:
             p = psutil.Process(pid)
             conns = p.net_connections(kind='inet')
-            if not conns: return COL_CYAN 
+            if not conns: return config.COL_CYAN 
+            
             for c in conns:
                 if c.status == 'ESTABLISHED' and c.raddr:
                     port = c.raddr.port
-                    if port == 80 or port == 8080: return (0.0, 0.0, 1.0, 1.0) 
-                    if port == 443: return (0.0, 1.0, 0.0, 1.0) 
-                    if port in [21, 22]: return (1.0, 1.0, 0.0, 1.0) 
-            return COL_CYAN 
-        except: return COL_CYAN 
+                    if port in [80, 8080]: return (0.0, 0.0, 1.0, 1.0) # Blue (HTTP)
+                    if port == 443: return (0.0, 1.0, 0.0, 1.0) # Green (HTTPS)
+                    if port in [21, 22]: return (1.0, 1.0, 0.0, 1.0) # Yellow (SSH/FTP)
+            return config.COL_CYAN 
+        except:
+            return config.COL_CYAN 
 
     def run(self):
         last_disk = 0
         while self.running:
             self.cpu = psutil.cpu_percent(interval=None)
             self.ram = psutil.virtual_memory().percent
+            
+            # Disk Activity
             try:
                 disk = psutil.disk_io_counters()
                 curr = disk.write_bytes
@@ -294,6 +303,7 @@ class SystemMonitor(threading.Thread):
                 last_disk = curr
             except: pass
             
+            # Process Network Activity
             try:
                 conns = [p for p in psutil.net_connections() if p.status == 'ESTABLISHED']
                 unique = {}
@@ -306,26 +316,27 @@ class SystemMonitor(threading.Thread):
                             unique[c.pid] = (p.name(), self.get_port_color(c.pid), port) 
                         except: pass
                 
-                # Atomic update: Build list first, then assign
                 new_procs = []
                 for pid, (name, color, port) in list(unique.items()):
                     new_procs.append((pid, name, color, port))
                 
-                # Sort by PID to ensure stable order (prevents satellites jumping/exploding)
+                # Sort by PID for stability
                 new_procs.sort(key=lambda x: x[0])
-                
-                # Limit to 12
                 self.processes = new_procs[:12]
                 
             except: pass
             time.sleep(1.0)
 
 class WiredEngine:
+    """Core Engine Class handling the Game Loop and OpenGL Context."""
     def __init__(self):
         pygame.init()
         
-        self.screen = pygame.display.set_mode((WIN_WIDTH, WIN_HEIGHT), DOUBLEBUF | OPENGL)
-        pygame.display.set_caption("Navi v22.0 - [BREACH PROTOCOL]")
+        self.screen = pygame.display.set_mode(
+            (config.WIN_WIDTH, config.WIN_HEIGHT), 
+            DOUBLEBUF | OPENGL
+        )
+        pygame.display.set_caption("Navi v23.0 - [BREACH PROTOCOL]")
         pygame.mouse.set_visible(False)
         pygame.event.set_grab(True)
         
@@ -339,9 +350,11 @@ class WiredEngine:
         
         # Camera
         glMatrixMode(GL_PROJECTION)
-        gluPerspective(90, (WIN_WIDTH/WIN_HEIGHT), 0.1, 100.0)
+        gluPerspective(90, (config.WIN_WIDTH/config.WIN_HEIGHT), 0.1, 100.0)
         glMatrixMode(GL_MODELVIEW)
-        self.drone_sound = sounds.generate_drone(55, 10.0) # 10s loop
+        
+        # Audio
+        self.drone_sound = sounds.generate_drone(55, 10.0)
         self.screech_sound = sounds.generate_screech()
         self.explode_sound = sounds.generate_explosion()
         self.drone_channel = None
@@ -349,67 +362,82 @@ class WiredEngine:
             self.drone_channel = self.drone_sound.play(loops=-1, fade_ms=2000)
             self.drone_channel.set_volume(0.3)
 
-        # Logic
+        # Subsystems
         self.cap = cv2.VideoCapture(0)
-        self.monitor = SystemMonitor(); self.monitor.start()
+        self.monitor = SystemMonitor()
+        self.monitor.start()
+        
         self.packet_queue = queue.Queue()
-        self.listener = protocol.ProtocolListener(self.packet_queue); self.listener.start()
+        self.listener = protocol.ProtocolListener(self.packet_queue)
+        self.listener.start()
+        
         self.data_buffer = collections.deque(maxlen=2000) 
         for _ in range(200): self.data_buffer.append(random.randint(0, 255))
-        self.wifi_scanner = wifi_scanner.WifiScanner(); self.wifi_scanner.start()
+        
+        self.wifi_scanner = wifi_scanner.WifiScanner()
+        self.wifi_scanner.start()
 
-        # Resources
+        # Rendering Resources
         self.font = pygame.font.SysFont("Consolas", 20, bold=True)
         self.cam_tex = WebcamTexture()
-        self.labels = {} 
-        self.post_process = PostProcess(WIN_WIDTH, WIN_HEIGHT)
+        self.labels: Dict[Tuple[str, config.Color], TextTexture] = {} 
+        self.post_process = PostProcess(config.WIN_WIDTH, config.WIN_HEIGHT)
         
         # State
         self.cam_pos = [0.0, 0.0, 5.0] 
-        self.cam_yaw = 0.0; self.cam_pitch = 0.0
+        self.cam_yaw = 0.0
+        self.cam_pitch = 0.0
         self.world_offset_z = 0.0 
         self.rotation = 0.0
         self.last_texture_cleanup = time.time()
-        self.packets = [] 
-        self.active_procs_objs = [] # {'pid', 'pos': (x,y,z), 'radius'}
+        self.packets: List[protocol.PacketObject] = [] 
+        self.active_procs_objs = [] 
         self.start_time = time.time()
         self.glitch_level = 0.0 
         self.running = True
         self.clock = pygame.time.Clock()
         
-        # Breach Narrative
+        # Narrative State
         self.breach_mode = False
         self.blackwall_timer = 0
         self.in_blackwall_zone = False
+        self.blackwall_state = {
+            'warnings': 0, 
+            'breached': False, 
+            'last_warning_time': 0, 
+            'message': None
+        }
+        self.zone_state = {}
 
         # --- Entity Initialization ---
-        self.entities = []
-        self.entities.append(entities.InfiniteTunnel(self))
-        self.entities.append(entities.CyberArch(self))
-        self.entities.append(entities.GhostWall(self))
-        self.entities.append(entities.Hypercore(self))
-        self.entities.append(entities.SatelliteSystem(self))
-        self.entities.append(entities.PacketSystem(self))
-        self.entities.append(entities.CyberCity(self))
-        self.entities.append(entities.Blackwall(self))
-        self.entities.append(entities.AlienSwarm(self))
-        self.entities.append(entities.StatsWall(self))
-        self.entities.append(entities.WifiVisualizer(self))
-        self.entities.append(entities.DigitalRain(self, side='left', color=entities.COL_HEX))
-        self.entities.append(entities.DigitalRain(self, side='right', color=entities.COL_RED))
-        self.entities.append(entities.IntroOverlay(self))
+        self.entities = [
+            entities.InfiniteTunnel(self),
+            entities.CyberArch(self),
+            entities.GhostWall(self),
+            entities.Hypercore(self),
+            entities.SatelliteSystem(self),
+            entities.PacketSystem(self),
+            entities.CyberCity(self),
+            entities.Blackwall(self),
+            entities.AlienSwarm(self),
+            entities.StatsWall(self),
+            entities.WifiVisualizer(self),
+            entities.DigitalRain(self, side='left', color=config.COL_HEX),
+            entities.DigitalRain(self, side='right', color=config.COL_RED),
+            entities.IntroOverlay(self)
+        ]
         
         self.particle_system = entities.ParticleSystem(self)
         self.entities.append(self.particle_system)
 
-        # Pre-cache
+        # Pre-cache commonly used hex textures
         print("Pre-caching textures...")
         for i in range(256):
             h = f"{i:02X}"
-            self.get_label(h, entities.COL_HEX)
+            self.get_label(h, config.COL_HEX)
         print("Ready.")
 
-    def get_label(self, text, color):
+    def get_label(self, text: str, color: config.Color) -> TextTexture:
         key = (text, color)
         if key not in self.labels:
             tex = TextTexture(self.font)
@@ -417,89 +445,66 @@ class WiredEngine:
             self.labels[key] = tex
         return self.labels[key]
         
-    def get_ray_from_mouse(self, mx, my):
-        # Viewport
+    def get_ray_from_mouse(self, mx: int, my: int) -> Tuple[Any, Any]:
         viewport = glGetIntegerv(GL_VIEWPORT)
-        
-        # Modelview
         modelview = glGetDoublev(GL_MODELVIEW_MATRIX)
-        
-        # Projection
         projection = glGetDoublev(GL_PROJECTION_MATRIX)
         
-        # WinY is inverted in Pygame vs OpenGL
         winY = float(viewport[3]) - float(my)
         winX = float(mx)
         
-        # Unproject Near
         try:
             start = gluUnProject(winX, winY, 0.0, modelview, projection, viewport)
             end = gluUnProject(winX, winY, 1.0, modelview, projection, viewport)
-        except: return (None, None)
+        except:
+            return (None, None)
         
-        # Direction
         dx = end[0] - start[0]
         dy = end[1] - start[1]
         dz = end[2] - start[2]
         
-        # Normalize
         length = math.sqrt(dx*dx + dy*dy + dz*dz)
-        direction = (dx/length, dy/length, dz/length)
+        if length == 0: return (None, None)
         
+        direction = (dx/length, dy/length, dz/length)
         return start, direction
 
     def ray_sphere_intersect(self, r_origin, r_dir, s_center, s_radius):
-        # Geometric solution
-        # L = center - origin
         lx = s_center[0] - r_origin[0]
         ly = s_center[1] - r_origin[1]
         lz = s_center[2] - r_origin[2]
         
-        # tca = L . D
         tca = lx*r_dir[0] + ly*r_dir[1] + lz*r_dir[2]
+        if tca < 0: return False 
         
-        if tca < 0: return False # Behind origin
-        
-        # d^2 = L.L - tca*tca
         d2 = (lx*lx + ly*ly + lz*lz) - tca*tca
-        
         if d2 > s_radius * s_radius: return False
         
-        return True # Hit
+        return True
 
     def handle_input(self):
         for event in pygame.event.get():
             if event.type == QUIT: self.running = False
             elif event.type == KEYDOWN and event.key == K_ESCAPE: self.running = False
             
-            # Raycasting Interaction
-            if event.type == MOUSEBUTTONDOWN and event.button == 1: # Left Click
+            # Mouse Interaction
+            if event.type == MOUSEBUTTONDOWN and event.button == 1:
                 start, direction = self.get_ray_from_mouse(event.pos[0], event.pos[1])
                 if start:
-                    # Check intersection with SatelliteSystem processes
-                    # We need the positions stored in SatelliteSystem (which are relative to world)
-                    # SatelliteSystem updates 'active_procs_objs' in engine
-                    
-                    hit = False
                     for obj in self.active_procs_objs:
-                        # obj['pos'] is set in SatelliteSystem.draw() which runs in render loop
-                        # This might be one frame lag, but acceptable
                         if 'pos' not in obj: continue
-                        
                         center = obj['pos']
-                        # Apply Ray-Sphere intersection
-                        if self.ray_sphere_intersect(start, direction, center, 2.0): # Approx radius 2
+                        if self.ray_sphere_intersect(start, direction, center, 2.0):
                             print(f"TERMINATING PROCESS: {obj['name']} ({obj['pid']})")
                             try:
                                 p = psutil.Process(obj['pid'])
                                 p.terminate()
                                 self.particle_system.explode(center[0], center[1], center[2], color=(1,0,0,1))
                                 if self.explode_sound: self.explode_sound.play()
-                                hit = True
                             except: pass
-                            break # One click, one kill
+                            break 
 
-        # Continuous Input
+        # Continuous Movement
         keys = pygame.key.get_pressed()
         speed = 2.0 
         
@@ -518,13 +523,14 @@ class WiredEngine:
         if keys[K_a]: dx -= rx * speed; dz -= rz * speed
         if keys[K_d]: dx += rx * speed; dz += rz * speed
             
-        # Blackwall Collision
+        # Wall Collision
         next_z = self.cam_pos[2] + dz
         global_z = next_z + self.world_offset_z
-        wall_z = -4500.0
+        wall_z = config.ZONE_THRESHOLDS['DEEP_WEB'] 
         
-        if not self.blackwall_state['breached'] and global_z < wall_z + 20:
-             if dz < 0: dz = 0 
+        if not self.blackwall_state['breached'] and global_z < config.ZONE_THRESHOLDS['DEEP_WEB'] + 20:
+             # Stop forward movement if not breached
+             pass 
         
         self.cam_pos[0] += dx
         self.cam_pos[2] += dz
@@ -540,64 +546,73 @@ class WiredEngine:
         self.rotation += 0.5
         
         global_z = self.cam_pos[2] + self.world_offset_z
-        wall_z = -4500.0
+        wall_z = config.ZONE_THRESHOLDS['DEEP_WEB'] 
         
-        # Blackwall Logic
-        if not self.blackwall_state['breached'] and global_z < -3500:
+        # Blackwall Narrative Logic
+        if not self.blackwall_state['breached'] and global_z < (wall_z + 1000):
              dist = global_z - wall_z 
+             # Warning logic
              if dist < 300 and self.blackwall_state['warnings'] == 0:
-                 self.blackwall_state['warnings'] = 1; self.blackwall_state['message'] = "WARNING: CLASSIFIED DATA"
-                 self.blackwall_state['last_warning_time'] = time.time(); self.cam_pos[2] += 20 
+                 self.blackwall_state['warnings'] = 1
+                 self.blackwall_state['message'] = "WARNING: CLASSIFIED DATA"
+                 self.blackwall_state['last_warning_time'] = time.time()
+                 self.cam_pos[2] += 20 
              elif dist < 150 and self.blackwall_state['warnings'] == 1:
                   if time.time() - self.blackwall_state['last_warning_time'] > 1.0:
-                      self.blackwall_state['warnings'] = 2; self.blackwall_state['message'] = "DANGER: LETHAL COUNTERMEASURES"
+                      self.blackwall_state['warnings'] = 2
+                      self.blackwall_state['message'] = "DANGER: LETHAL COUNTERMEASURES"
                       self.blackwall_state['last_warning_time'] = time.time()
              elif dist < 50 and self.blackwall_state['warnings'] == 2:
                   if time.time() - self.blackwall_state['last_warning_time'] > 1.0:
-                      self.blackwall_state['warnings'] = 3; self.blackwall_state['message'] = "CRITICAL: BREACH IMMINENT"
+                      self.blackwall_state['warnings'] = 3
+                      self.blackwall_state['message'] = "CRITICAL: BREACH IMMINENT"
                       self.blackwall_state['last_warning_time'] = time.time()
+             
              if self.blackwall_state['warnings'] == 3 and time.time() - self.blackwall_state['last_warning_time'] > 2.0:
-                   self.blackwall_state['breached'] = True; self.blackwall_state['message'] = "SYSTEM FAILURE // BREACH DETECTED"
+                   self.blackwall_state['breached'] = True
+                   self.blackwall_state['message'] = "SYSTEM FAILURE // BREACH DETECTED"
 
-        # Zones & Breach Narrative
+        # Zone State
         self.in_blackwall_zone = False
-        if global_z > -1000:
-            self.zone_state = {'name': 'SURFACE', 'grid_color': COL_GRID, 'tint': (0.8, 1.1, 1.0), 'distortion': 0.0}
-        elif global_z > -3000:
+        if global_z > config.ZONE_THRESHOLDS['SURFACE']:
+            self.zone_state = {'name': 'SURFACE', 'grid_color': config.COL_GRID, 'tint': (0.8, 1.1, 1.0), 'distortion': 0.0}
+        elif global_z > config.ZONE_THRESHOLDS['SPRAWL']:
             self.zone_state = {'name': 'SPRAWL', 'grid_color': (0.6, 0.0, 0.8, 0.5), 'tint': (0.9, 0.8, 1.1), 'distortion': 0.1}
-        elif global_z > -4500:
+        elif global_z > config.ZONE_THRESHOLDS['DEEP_WEB']:
             self.zone_state = {'name': 'DEEP_WEB', 'grid_color': (0.0, 0.8, 0.2, 0.5), 'tint': (0.7, 1.0, 0.7), 'distortion': 1.5}
-        elif global_z > -5500:
+        elif global_z > config.ZONE_THRESHOLDS['BLACKWALL']:
             self.zone_state = {'name': 'BLACKWALL', 'grid_color': (0.8, 0.0, 0.0, 0.5), 'tint': (1.2, 0.8, 0.8), 'distortion': 3.0}
             self.in_blackwall_zone = True
         else:
             self.zone_state = {'name': 'OLD_NET', 'grid_color': (0.8, 0.8, 0.9, 0.6), 'tint': (0.6, 0.6, 0.7), 'distortion': 4.0}
 
-        # Breach Timer
+        # Breach Event
         if self.in_blackwall_zone and not self.breach_mode:
             self.blackwall_timer += 1.0 / 60.0
             if self.blackwall_timer > 10.0:
                 self.breach_mode = True
                 self.blackwall_state['message'] = "SYSTEM COMPROMISED - HUNTERS DEPLOYED"
                 if self.screech_sound: self.screech_sound.play()
-                # Spawn Hunters
                 for _ in range(5):
-                    spawn_pos = (self.cam_pos[0] + random.uniform(-10, 10), 
-                                 self.cam_pos[1] + random.uniform(-5, 5), 
-                                 self.cam_pos[2] - 50) # In front of player
+                    spawn_pos = (
+                        self.cam_pos[0] + random.uniform(-10, 10), 
+                        self.cam_pos[1] + random.uniform(-5, 5), 
+                        self.cam_pos[2] - 50
+                    )
                     self.entities.append(entities.Hunter(self, spawn_pos))
         
-        # Audio Modulation
+        # Audio
         if self.drone_channel:
-            # Volume based on packet count
             target_vol = 0.3 + min(0.7, len(self.packets) * 0.05)
             self.drone_channel.set_volume(target_vol)
 
         # Floating Origin
         if self.cam_pos[2] < -100.0:
-            shift = self.cam_pos[2]; self.cam_pos[2] -= shift; self.world_offset_z += shift
+            shift = self.cam_pos[2]
+            self.cam_pos[2] -= shift
+            self.world_offset_z += shift
         
-        # GC
+        # Texture GC
         if time.time() - self.last_texture_cleanup > 10.0:
             self.last_texture_cleanup = time.time()
             threshold = time.time() - 60.0
@@ -608,60 +623,68 @@ class WiredEngine:
                 del self.labels[k]
 
     def draw(self):
-        # Begin Post-Process
         self.post_process.begin()
         
-        # Standard Rendering (to FBO)
         glLoadIdentity()
         rad_yaw = math.radians(self.cam_yaw)
         rad_pitch = math.radians(self.cam_pitch)
         lx = math.sin(rad_yaw) * math.cos(rad_pitch)
         ly = math.sin(rad_pitch)
         lz = -math.cos(rad_yaw) * math.cos(rad_pitch)
-        gluLookAt(self.cam_pos[0], self.cam_pos[1], self.cam_pos[2],
-                  self.cam_pos[0] + lx, self.cam_pos[1] + ly, self.cam_pos[2] + lz,
-                  0, 1, 0)
+        gluLookAt(
+            self.cam_pos[0], self.cam_pos[1], self.cam_pos[2],
+            self.cam_pos[0] + lx, self.cam_pos[1] + ly, self.cam_pos[2] + lz,
+            0, 1, 0
+        )
         
         for entity in self.entities: entity.draw()
         
-        # End Post-Process -> Draw to Screen with Effects
+        # Finalize Frame
         t = time.time() - self.start_time
         tint = self.zone_state.get('tint', (1,1,1))
         glitch = self.glitch_level + (2.0 if self.breach_mode else 0.0)
         self.post_process.end(t, glitch, tint, self.breach_mode)
         
-        # UI Overlay (Drawn on top of effects)
+        # HUD Overlay
         msg = self.blackwall_state.get('message')
         if msg:
-             glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity()
-             gluOrtho2D(0, self.screen.get_width(), self.screen.get_height(), 0)
-             glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity()
-             glDisable(GL_DEPTH_TEST); glEnable(GL_BLEND)
-             lbl = self.get_label(msg, (255, 50, 50))
-             glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, lbl.texture_id)
-             x = (self.screen.get_width() - lbl.width) / 2
-             y = (self.screen.get_height() / 2) - 100
-             alpha = 0.5 + math.sin(time.time()*15)*0.5
-             glColor4f(1, 1, 1, alpha)
-             glBegin(GL_QUADS)
-             glTexCoord2f(0, 0); glVertex2f(x, y); glTexCoord2f(1, 0); glVertex2f(x + lbl.width, y)
-             glTexCoord2f(1, 1); glVertex2f(x + lbl.width, y + lbl.height); glTexCoord2f(0, 1); glVertex2f(x, y + lbl.height)
-             glEnd()
-             glDisable(GL_TEXTURE_2D); glEnable(GL_DEPTH_TEST)
-             glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix()
+             self._draw_overlay_message(msg)
         
         pygame.display.flip()
+
+    def _draw_overlay_message(self, msg: str):
+         glMatrixMode(GL_PROJECTION); glPushMatrix(); glLoadIdentity()
+         gluOrtho2D(0, self.screen.get_width(), self.screen.get_height(), 0)
+         glMatrixMode(GL_MODELVIEW); glPushMatrix(); glLoadIdentity()
+         glDisable(GL_DEPTH_TEST); glEnable(GL_BLEND)
+         
+         lbl = self.get_label(msg, (1.0, 0.2, 0.2, 1.0))
+         glEnable(GL_TEXTURE_2D); glBindTexture(GL_TEXTURE_2D, lbl.texture_id)
+         
+         x = (self.screen.get_width() - lbl.width) / 2
+         y = (self.screen.get_height() / 2) - 100
+         alpha = 0.5 + math.sin(time.time()*15)*0.5
+         glColor4f(1, 1, 1, alpha)
+         
+         glBegin(GL_QUADS)
+         glTexCoord2f(0, 0); glVertex2f(x, y)
+         glTexCoord2f(1, 0); glVertex2f(x + lbl.width, y)
+         glTexCoord2f(1, 1); glVertex2f(x + lbl.width, y + lbl.height)
+         glTexCoord2f(0, 1); glVertex2f(x, y + lbl.height)
+         glEnd()
+         
+         glDisable(GL_TEXTURE_2D); glEnable(GL_DEPTH_TEST)
+         glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix()
 
     def loop(self):
         try:
             print("Entering main loop...")
-            self.blackwall_state = {'warnings': 0, 'breached': False, 'last_warning_time': 0, 'message': None}
             frame_count = 0
             while self.running:
                 self.handle_input()
                 self.update()
                 self.draw()
-                self.clock.tick(60)
+                self.clock.tick(config.FPS_TARGET)
                 frame_count += 1
                 if frame_count % 60 == 0:
                     print(f"FPS: {self.clock.get_fps():.2f}")
@@ -670,8 +693,11 @@ class WiredEngine:
             import traceback; traceback.print_exc()
         finally:
             print("Cleaning up...")
-            self.listener.stop(); self.monitor.running = False; self.wifi_scanner.stop()
-            self.cap.release(); pygame.quit()
+            self.listener.stop()
+            self.monitor.running = False
+            self.wifi_scanner.stop()
+            self.cap.release()
+            pygame.quit()
 
 if __name__ == "__main__":
     WiredEngine().loop()

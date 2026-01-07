@@ -1,82 +1,74 @@
 import threading
 import queue
 import random
-import time
 import math
+from dataclasses import dataclass, field
+from typing import Optional
+
 from scapy.all import sniff, IP, TCP, UDP, ICMP, conf
+import config
 
-# --- Constants ---
-# Colors
-COLOR_TCP = (0.0, 1.0, 1.0, 1.0)   # Cyan (normalized RGBA)
-COLOR_UDP = (1.0, 153/255.0, 0.0, 1.0)   # Orange (normalized RGBA)
-COLOR_ICMP = (1.0, 0.2, 0.8, 1.0) # Magenta/Pink for ICMP
-COLOR_OTHER = (100/255.0, 100/255.0, 100/255.0, 1.0) # Grey for others (normalized RGBA)
-
-# Packet Spawn Config
-PACKET_ORBITAL_RADIUS_MIN = 5.0 # Min radius for packets to orbit outside the tunnel
-PACKET_ORBITAL_RADIUS_MAX = 7.0 # Max radius for packets to orbit outside the tunnel
-PACKET_ORBITAL_SPEED_MIN = 0.02 # Min orbital speed
-PACKET_ORBITAL_SPEED_MAX = 0.05 # Max orbital speed
-
+@dataclass
 class PacketObject:
     """
-    Represents a visualized packet in 3D space.
+    Represents a visualized packet in 3D space with physical properties.
     """
-    def __init__(self, src_ip, dst_ip, protocol, size, payload):
-        self.src = src_ip
-        self.dst = dst_ip
-        self.protocol = protocol
-        self.size = size
-        self.payload = payload
-        
-        # 3D Position
-        self.orbital_radius = random.uniform(PACKET_ORBITAL_RADIUS_MIN, PACKET_ORBITAL_RADIUS_MAX)
-        self.angle = random.uniform(0, 2 * math.pi) # Random initial angle
+    src: str
+    dst: str
+    protocol: str
+    size: int
+    payload: str
+    
+    # 3D Position & Physics (Initialized in __post_init__)
+    x: float = field(init=False)
+    y: float = field(init=False)
+    z: float = field(init=False)
+    global_z: float = field(init=False, default=0.0) # Used by PacketSystem
+    
+    orbital_radius: float = field(init=False)
+    angle: float = field(init=False)
+    orbital_speed: float = field(init=False)
+    
+    # Visualization
+    color: config.Color = field(init=False)
+    lane_x: float = field(init=False, default=0.0)
+    lane_y: float = field(init=False, default=0.0)
+
+    def __post_init__(self):
+        # Position Logic
+        self.orbital_radius = random.uniform(config.PACKET_ORBITAL_RADIUS_MIN, config.PACKET_ORBITAL_RADIUS_MAX)
+        self.angle = random.uniform(0, 2 * math.pi)
+        self.orbital_speed = random.uniform(config.PACKET_ORBITAL_SPEED_MIN, config.PACKET_ORBITAL_SPEED_MAX)
+
+        # Initial Orbit Position
         self.x = math.cos(self.angle) * self.orbital_radius
-        self.y = math.sin(self.angle) * self.orbital_radius * 0.5 # Flattened Y-axis for elliptical orbit
-        self.z = random.uniform(-5.0, -2.0) # Fixed Z-range
+        self.y = math.sin(self.angle) * self.orbital_radius * 0.5
+        self.z = random.uniform(-5.0, -2.0)
 
-        self.prev_x = self.x
-        self.prev_y = self.y
-        self.prev_z = self.z
-        
-        # Orbital speed
-        self.orbital_speed = random.uniform(PACKET_ORBITAL_SPEED_MIN, PACKET_ORBITAL_SPEED_MAX)
-
-        # Visual properties
-        self.color = COLOR_OTHER
+        # Color Mapping
         if self.protocol == 'TCP':
-            self.color = COLOR_TCP
+            self.color = config.COL_CYAN
         elif self.protocol == 'UDP':
-            self.color = COLOR_UDP
+            self.color = config.COL_ORANGE
         elif self.protocol == 'ICMP':
-            self.color = COLOR_ICMP
-            
-        # self.speed is no longer used for Z-movement, but keep if for potential future use
-        self.speed = max(0.05, 0.3 - (self.size / 3000.0))
-
-    def update(self):
-        """
-        No longer moves the packet in Z, always returns True as movement is external.
-        """
-        # Movement is handled in main_gl.py
-        return True
+            self.color = config.COL_MAGENTA
+        else:
+            self.color = config.COL_GREY
 
 class ProtocolListener(threading.Thread):
     """
-    Background thread to sniff network traffic using Scapy.
+    Background daemon for sniffing network traffic via Scapy.
     """
-    def __init__(self, packet_queue):
+    def __init__(self, packet_queue: queue.Queue):
         super().__init__()
         self.packet_queue = packet_queue
         self.running = True
-        self.daemon = True # Kill thread when main app exits
+        self.daemon = True
 
-    def run(self):
-        # Scapy sniff callback
-        def process_packet(packet):
+    def run(self) -> None:
+        def process_packet(packet) -> bool:
             if not self.running:
-                return False # Stop sniffing
+                return False
             
             if IP in packet:
                 src = packet[IP].src
@@ -91,31 +83,29 @@ class ProtocolListener(threading.Thread):
                 elif ICMP in packet:
                     proto = 'ICMP'
                 
-                # Extract payload summary
-                payload_data = packet.summary()
+                pkt_obj = PacketObject(
+                    src=src,
+                    dst=dst,
+                    protocol=proto,
+                    size=size,
+                    payload=packet.summary()
+                )
                 
-                # Create packet object
-                pkt_obj = PacketObject(src, dst, proto, size, payload_data)
-                
-                # Put in queue (non-blocking)
                 try:
                     self.packet_queue.put(pkt_obj, block=False)
                 except queue.Full:
-                    pass # Drop packet if queue is full (backpressure)
+                    pass # Backpressure: Drop packet
 
-        # Start sniffing
-        # store=0 prevents Scapy from keeping all packets in memory
-        # count=0 means infinity
-        # timeout=1 allows checking self.running periodically if we were looping manually,
-        # but with callback, we rely on the callback or stop_filter.
-        # However, `sniff` blocks. We need a way to stop it cleanly or just let it die with the daemon.
-        # Ideally, we use `stop_filter` lambda, but `daemon=True` is usually enough for simple apps.
         try:
-            while self.running: # Loop to continuously sniff while thread is running
-                sniff(prn=process_packet, store=0, iface=conf.iface, stop_filter=lambda x: not self.running)
+            sniff(
+                prn=process_packet,
+                store=0,
+                iface=conf.iface,
+                stop_filter=lambda x: not self.running
+            )
         except Exception as e:
-            print(f"Sniffer Error: {e}")
-            print("Make sure Npcap is installed on Windows for Scapy.")
+            print(f"Error: Scapy Sniffer failed: {e}")
+            print("Ensure Npcap is installed in 'WinPcap API-compatible mode'.")
 
-    def stop(self):
+    def stop(self) -> None:
         self.running = False

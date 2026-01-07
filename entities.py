@@ -1,42 +1,36 @@
-import pygame
-from OpenGL.GL import *
-from OpenGL.GLU import *
-from OpenGL.arrays import vbo
-import numpy as np
+import collections
 import math
 import random
 import time
-import collections
+from typing import TYPE_CHECKING, List, Tuple, Dict, Any, Optional
 
-# --- Constants ---
-TUNNEL_DEPTH = 40.0
-WIFI_Z_OFFSET = -35.0
-MAX_PACKETS_DISPLAYED = 40
+import pygame
+import numpy as np
+from OpenGL.GL import *
+from OpenGL.GLU import *
+from OpenGL.arrays import vbo
 
-# Colors
-COL_CYAN = (0.0, 1.0, 1.0, 1.0)
-COL_RED = (1.0, 0.2, 0.2, 1.0)
-COL_GRID = (0.0, 0.15, 0.3, 0.4)
-COL_DARK = (0.02, 0.02, 0.04, 1.0)
-COL_TEXT = (0.8, 0.8, 0.8, 1.0)
-COL_GHOST = (0.2, 1.0, 0.2, 0.8)
-COL_WHITE = (1.0, 1.0, 1.0, 1.0)
-COL_YELLOW = (1.0, 1.0, 0.0, 1.0)
-COL_HEX = (0.0, 0.6, 0.0, 1.0)
+import config
+
+if TYPE_CHECKING:
+    from main_gl import WiredEngine
 
 class GameObject:
-    def __init__(self, engine):
+    """Base class for all 3D entities in the world."""
+    def __init__(self, engine: 'WiredEngine'):
         self.engine = engine
 
     def update(self):
+        """Update logic per frame."""
         pass
 
     def draw(self):
+        """Render logic per frame."""
         pass
 
 class Mesh:
     """Helper to manage VBOs for static or semi-static geometry."""
-    def __init__(self, vertices, mode=GL_LINES):
+    def __init__(self, vertices: List[Tuple[float, float, float]], mode=GL_LINES):
         self.vertex_count = len(vertices)
         self.mode = mode
         self.data = np.array(vertices, dtype=np.float32)
@@ -55,14 +49,14 @@ class Mesh:
             print(f"VBO Draw Error: {e}")
 
 class DynamicMesh:
-    """Helper to manage dynamic VBOs."""
+    """Helper to manage dynamic VBOs that change every frame."""
     def __init__(self, mode=GL_LINES):
         self.mode = mode
         self.vbo_pos = vbo.VBO(np.array([], dtype=np.float32))
         self.vbo_col = vbo.VBO(np.array([], dtype=np.float32))
         self.vertex_count = 0
 
-    def update(self, vertices, colors):
+    def update(self, vertices: List[float], colors: List[float]):
         if not vertices:
             self.vertex_count = 0
             return
@@ -99,12 +93,13 @@ class DynamicMesh:
 
 class ParticleSystem(GameObject):
     """Manages simple one-shot particle explosions."""
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
-        self.particles = [] # list of [x, y, z, vx, vy, vz, life, max_life, color]
+        # list of [x, y, z, vx, vy, vz, life, max_life, color_tuple]
+        self.particles = [] 
         self.vbo = DynamicMesh(GL_POINTS)
 
-    def explode(self, x, y, z, color=(1, 0.5, 0, 1), count=50):
+    def explode(self, x: float, y: float, z: float, color: config.Color = (1, 0.5, 0, 1), count: int = 50):
         for _ in range(count):
             vx = random.uniform(-5, 5)
             vy = random.uniform(-5, 5)
@@ -133,6 +128,7 @@ class ParticleSystem(GameObject):
             verts.extend([p[0], p[1], p[2]])
             # Fade out
             alpha = p[6] / p[7]
+            # p[8] is color tuple
             cols.extend([p[8][0], p[8][1], p[8][2], alpha])
             
         glPushAttrib(GL_ENABLE_BIT)
@@ -145,10 +141,10 @@ class ParticleSystem(GameObject):
 
 class Hunter(GameObject):
     """Aggressive entity that spawns during Breach Mode."""
-    def __init__(self, engine, start_pos):
+    def __init__(self, engine: 'WiredEngine', start_pos: Tuple[float, float, float]):
         super().__init__(engine)
         self.pos = list(start_pos)
-        self.speed = 8.0 # Fast
+        self.speed = 8.0 
         self.size = 1.0
         
     def update(self):
@@ -156,27 +152,24 @@ class Hunter(GameObject):
         target = self.engine.cam_pos
         dx = target[0] - self.pos[0]
         dy = target[1] - self.pos[1]
-        dz = target[2] - (self.pos[2] - self.engine.world_offset_z) # Adjust for floating origin
+        dz = target[2] - (self.pos[2] - self.engine.world_offset_z)
         
         dist = math.sqrt(dx*dx + dy*dy + dz*dz)
         if dist > 0.5:
             self.pos[0] += (dx/dist) * self.speed * 0.016
             self.pos[1] += (dy/dist) * self.speed * 0.016
-            self.pos[2] += (dz/dist) * self.speed * 0.016 # Local Z move
+            self.pos[2] += (dz/dist) * self.speed * 0.016 
             
     def draw(self):
         glPushMatrix()
         glTranslatef(self.pos[0], self.pos[1], self.pos[2])
         
-        # Look at camera
-        # Simple billboard rotation or lookat math
         glRotatef(time.time() * 200, 1, 1, 0)
         
         glColor4f(1.0, 0.0, 0.0, 0.8)
         scale = 1.0 + math.sin(time.time() * 20) * 0.2
         glScalef(scale, scale, scale)
         
-        # Draw Tetrahedron
         glBegin(GL_TRIANGLES)
         # Face 1
         glVertex3f(0, 1, 0); glVertex3f(-1, -1, 1); glVertex3f(1, -1, 1)
@@ -191,13 +184,14 @@ class Hunter(GameObject):
         glPopMatrix()
 
 class InfiniteTunnel(GameObject):
-    def __init__(self, engine):
+    """Renders the scrolling grid environment."""
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.segment_length = 20.0
         self.grid_step = 2.0
         self.mesh = self._generate_segment_mesh()
 
-    def _generate_segment_mesh(self):
+    def _generate_segment_mesh(self) -> Mesh:
         verts = []
         steps = int(self.segment_length / self.grid_step)
         for i in range(steps + 1):
@@ -215,11 +209,11 @@ class InfiniteTunnel(GameObject):
         return Mesh(verts, GL_LINES)
 
     def draw(self):
-        grid_col = getattr(self.engine, 'zone_state', {}).get('grid_color', COL_GRID)
-        zone_name = getattr(self.engine, 'zone_state', {}).get('name', 'SURFACE')
+        grid_col = self.engine.zone_state.get('grid_color', config.COL_GRID)
+        zone_name = self.engine.zone_state.get('name', 'SURFACE')
         
         if self.engine.monitor.disk_write:
-            # "Pulse" the current theme color instead of flashing white
+            # "Pulse"
             r = min(1.0, grid_col[0] + 0.4)
             g = min(1.0, grid_col[1] + 0.4)
             b = min(1.0, grid_col[2] + 0.4)
@@ -240,6 +234,7 @@ class InfiniteTunnel(GameObject):
             glPushMatrix()
             glTranslatef(0, 0, z_pos)
             
+            # Zone-specific deformations
             if zone_name == 'DEEP_WEB':
                  glRotatef(math.sin(z_pos * 0.1 + time.time()) * 5.0, 0, 0, 1)
             elif zone_name == 'BLACKWALL':
@@ -261,12 +256,12 @@ class InfiniteTunnel(GameObject):
             glPopMatrix()
 
 class CyberArch(GameObject):
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.mesh = self._generate_arch_mesh()
         self.spacing = 50.0
 
-    def _generate_arch_mesh(self):
+    def _generate_arch_mesh(self) -> Mesh:
         verts = []
         verts.append((-4, -3, 0)); verts.append((-4, 2, 0))
         verts.append((-4, 2, 0)); verts.append((-2, 3, 0))
@@ -276,7 +271,7 @@ class CyberArch(GameObject):
         return Mesh(verts, GL_LINES)
 
     def draw(self):
-        global_cam_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        global_cam_z = self.engine.cam_pos[2] + self.engine.world_offset_z
         current_idx = int(global_cam_z / self.spacing)
         
         glPushAttrib(GL_ENABLE_BIT)
@@ -286,7 +281,7 @@ class CyberArch(GameObject):
         
         for i in range(current_idx - 2, current_idx + 4):
             arch_global_z = i * self.spacing
-            arch_local_z = arch_global_z - getattr(self.engine, 'world_offset_z', 0.0)
+            arch_local_z = arch_global_z - self.engine.world_offset_z
             
             dist = abs(self.engine.cam_pos[2] - arch_local_z)
             if dist > 120: continue 
@@ -294,7 +289,7 @@ class CyberArch(GameObject):
             alpha = max(0, min(1, 1.0 - (dist / 100.0)))
             if alpha <= 0: continue
 
-            colors = [COL_CYAN, COL_RED, COL_YELLOW, (0.5, 0.0, 1.0, 1.0)]
+            colors = [config.COL_CYAN, config.COL_RED, config.COL_YELLOW, (0.5, 0.0, 1.0, 1.0)]
             col = colors[abs(i) % len(colors)]
             glColor4f(col[0], col[1], col[2], alpha)
 
@@ -315,7 +310,7 @@ class GhostWall(GameObject):
         glEnable(GL_TEXTURE_2D)
         if self.engine.cam_tex:
             self.engine.cam_tex.bind()
-        glColor4f(*COL_GHOST)
+        glColor4f(*config.COL_GHOST)
         glBegin(GL_QUADS)
         glTexCoord2f(0, 0); glVertex3f(-4, -3, z)
         glTexCoord2f(1, 0); glVertex3f(4, -3, z)
@@ -325,13 +320,13 @@ class GhostWall(GameObject):
         glDisable(GL_TEXTURE_2D)
 
 class Hypercore(GameObject):
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.quadric = gluNewQuadric()
 
     def draw(self):
         global_z = -15.0
-        local_z = global_z - getattr(self.engine, 'world_offset_z', 0.0)
+        local_z = global_z - self.engine.world_offset_z
         
         if local_z > self.engine.cam_pos[2] + 20 or local_z < self.engine.cam_pos[2] - 100:
             return
@@ -394,7 +389,7 @@ class Hypercore(GameObject):
             z = math.sin(angle) * ring_radius
             char_idx = int(time.time() * 10 + i) % 16
             char = chars[char_idx]
-            lbl = self.engine.get_label(char, COL_WHITE)
+            lbl = self.engine.get_label(char, config.COL_WHITE)
             
             glPushMatrix()
             glTranslatef(x, 0, z)
@@ -428,10 +423,9 @@ class Hypercore(GameObject):
 class SatelliteSystem(GameObject):
     def update(self):
         current_procs = self.engine.monitor.processes
-        # Always rebuild to ensure sync with sorted/stable list from Monitor
         self.engine.active_procs_objs = []
         for i, (pid, name, color, port) in enumerate(current_procs):
-            # Use PID hash for stable angle to prevent jitter/explosion when list changes
+            # Stable angle via PID
             stable_angle = (pid % 12) * (2 * math.pi / 12)
             
             self.engine.active_procs_objs.append({
@@ -446,7 +440,7 @@ class SatelliteSystem(GameObject):
 
     def draw(self):
         global_z = -15.0
-        local_z = global_z - getattr(self.engine, 'world_offset_z', 0.0)
+        local_z = global_z - self.engine.world_offset_z
         
         if local_z > self.engine.cam_pos[2] + 20 or local_z < self.engine.cam_pos[2] - 100:
             return
@@ -478,20 +472,6 @@ class SatelliteSystem(GameObject):
             px = math.cos(angle) * radius
             py = math.sin(angle) * radius
             
-            # Store world pos for Raycasting (Approximation: orbit center + offset)
-            # The orbit center is (0, 0, local_z).
-            # The object is at (px, py, 0) relative to center.
-            # BUT: The whole ring rotates! glRotatef(-self.engine.rotation * 0.5, 0, 0, 1)
-            # We need to manually calculate the rotated position to store it accurately for raycasting.
-            rot_angle = math.radians(-self.engine.rotation * 0.5)
-            # Combine orbit angle + ring rotation
-            final_angle = angle + rot_angle # Wait, angle already includes orbit. Ring rot is frame.
-            # Actually: glRotate rotates the coordinate system.
-            # Coordinate (px, py) in rotated system:
-            # World X = px * cos(rot) - py * sin(rot)
-            # World Y = px * sin(rot) + py * cos(rot)
-            # Let's simplify.
-            
             # Since we need exact world coords for raycasting, calculating it here:
             # Ring Rotation Angle
             ring_rot = -self.engine.rotation * 0.5 # Degrees
@@ -509,21 +489,17 @@ class SatelliteSystem(GameObject):
             obj['pos'] = (wx, wy, wz)
             
             glPushMatrix()
-            # Draw at Ring Space (px, py)
             glTranslatef(px, py, 0)
             
-            # Rotate object itself
             glRotatef(self.engine.rotation * 5, 0, 0, 1)
             glScalef(0.2, 0.2, 0.2)
             glColor4f(*obj['color'])
             
-            # Draw Cube
             glBegin(GL_QUADS)
             glVertex3f(-1,-1,0); glVertex3f(1,-1,0); glVertex3f(1,1,0); glVertex3f(-1,1,0)
             glEnd()
             glPopMatrix()
             
-            # Connector Line
             glBegin(GL_LINES)
             glColor4f(obj['color'][0], obj['color'][1], obj['color'][2], 0.1)
             glVertex3f(px, py, 0); glVertex3f(0, 0, 0)
@@ -532,9 +508,9 @@ class SatelliteSystem(GameObject):
             # Label
             glPushMatrix()
             glTranslatef(px, py + 0.5, 0)
-            glRotatef(self.engine.rotation * 0.5, 0, 0, 1) # Counter-rotate label?
+            glRotatef(self.engine.rotation * 0.5, 0, 0, 1) # Counter-rotate
             glScalef(0.015, 0.015, 0.015)
-            lbl = self.engine.get_label(obj['name'], COL_WHITE)
+            lbl = self.engine.get_label(obj['name'], config.COL_WHITE)
             glTranslatef(-lbl.width/2, 0, 0)
             glEnable(GL_TEXTURE_2D)
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
@@ -546,22 +522,24 @@ class SatelliteSystem(GameObject):
         glPopAttrib()
 
 class DummyPacket:
+    """Mock packet for fallback/demo mode."""
     def __init__(self, p_type):
         self.protocol = p_type
         self.size = random.randint(64, 1500)
         self.payload = f"SIMULATED_{random.randint(1000,9999)}"
         self.src = "192.168.1.X"
         self.dst = "10.0.0.X"
-        if p_type == 'TCP': self.color = (0.0, 1.0, 1.0, 1.0)
-        elif p_type == 'UDP': self.color = (1.0, 0.6, 0.0, 1.0)
-        else: self.color = (0.5, 0.5, 0.5, 1.0)
+        if p_type == 'TCP': self.color = config.COL_CYAN
+        elif p_type == 'UDP': self.color = config.COL_ORANGE
+        else: self.color = config.COL_GREY
 
 class PacketSystem(GameObject):
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.trail_vbo = DynamicMesh(GL_LINES)
 
     def update(self):
+        # 1. Process Queue
         try:
             while True:
                 p = self.engine.packet_queue.get_nowait()
@@ -569,26 +547,27 @@ class PacketSystem(GameObject):
                 if p.payload:
                     for char in p.payload:
                         self.engine.data_buffer.append(ord(char) % 256)
-                if len(self.engine.packets) > MAX_PACKETS_DISPLAYED:
+                if len(self.engine.packets) > config.MAX_PACKETS_DISPLAYED:
                     self.engine.packets.pop(0)
                 self.engine.glitch_level = 0.3
         except Exception: pass
         
-        # Simulation Fallback (If no real traffic or permission denied)
+        # 2. Simulation Fallback
         if len(self.engine.packets) < 5 and random.random() < 0.1:
             proto = random.choice(['TCP', 'UDP', 'HTTP'])
             p = DummyPacket(proto)
             self.engine.packets.append(p)
             self.engine.glitch_level = 0.1 
         
+        # 3. Physics Update
         updated_packets = []
         for p in self.engine.packets:
             if not hasattr(p, 'history'):
                 p.history = collections.deque(maxlen=20)
-                current_global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+                current_global_z = self.engine.cam_pos[2] + self.engine.world_offset_z
                 p.base_global_z = current_global_z + random.uniform(20, -20)
                 
-                # Lane assignment with jitter to prevent "single laser" look
+                # Lane Assignment with Jitter
                 jitter = random.uniform(-0.8, 0.8)
                 if p.protocol == 'TCP': p.lane_x = -3.0 + jitter
                 elif p.protocol == 'UDP': p.lane_x = 3.0 + jitter
@@ -616,7 +595,7 @@ class PacketSystem(GameObject):
         glDisable(GL_TEXTURE_2D)
         glLineWidth(3.0) 
         
-        world_offset = getattr(self.engine, 'world_offset_z', 0.0)
+        world_offset = self.engine.world_offset_z
         pos_data = []
         col_data = []
         
@@ -640,8 +619,6 @@ class PacketSystem(GameObject):
         # Draw Packet Heads (Projectiles) & Labels
         glPointSize(10.0)
         
-        # We need to draw points first, then labels (transparent)
-        # 1. Draw Points
         glBegin(GL_POINTS)
         for p in self.engine.packets:
             if hasattr(p, 'history') and len(p.history) > 0:
@@ -651,7 +628,7 @@ class PacketSystem(GameObject):
                 glVertex3f(hx, hy, hz)
         glEnd()
 
-        # 2. Draw Labels (Data)
+        # Labels
         glEnable(GL_TEXTURE_2D)
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
         
@@ -662,37 +639,30 @@ class PacketSystem(GameObject):
                 hx, hy = p.x, p.y
                 hz = p.global_z - world_offset
                 
-                # Distance check
                 dx = hx - cam_pos[0]
                 dy = hy - cam_pos[1]
                 dz = hz - cam_pos[2]
                 dist = math.sqrt(dx*dx + dy*dy + dz*dz)
                 
-                if dist < 60.0 and dist > 1.5: # Render labels if within range
+                if dist < 60.0 and dist > 1.5:
                     glPushMatrix()
-                    # Offset label slightly more for readability
                     glTranslatef(hx + 0.8, hy + 0.8, hz)
                     
-                    # Billboard (Face Camera)
                     glRotatef(-self.engine.cam_yaw, 0, 1, 0)
                     glRotatef(-self.engine.cam_pitch, 1, 0, 0)
                     
-                    # Larger scale for visibility
                     scale = 0.015 * (dist / 12.0) 
                     scale = max(0.01, min(0.03, scale))
                     glScalef(scale, scale, scale)
                     
                     label_text = f"{p.protocol} > {p.dst}"
-                    # Truncate if too long
                     if len(label_text) > 24: label_text = label_text[:24] + ".."
                     
                     lbl = self.engine.get_label(label_text, p.color)
                     lbl.draw(0, 0, 0, 1.0)
-                    
                     glPopMatrix()
                     
         glDisable(GL_TEXTURE_2D)
-
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPopAttrib()
 
@@ -700,7 +670,7 @@ class DigitalRain(GameObject):
     """
     Optimized Digital Rain using a Texture Atlas and Batched VBO.
     """
-    def __init__(self, engine, side='left', color=COL_HEX):
+    def __init__(self, engine: 'WiredEngine', side='left', color=config.COL_HEX):
         super().__init__(engine)
         self.side = side
         self.color = color
@@ -708,10 +678,8 @@ class DigitalRain(GameObject):
         
         # Drops: list of [x_local, y_global, speed, char_indices_list]
         self.drops = []
-        self.num_drops = 150 # Increased density (was 20)
+        self.num_drops = 150
         
-        # Pre-allocate VBO buffers?
-        # We will regenerate array every frame since it's dynamic
         self.vbo = vbo.VBO(np.array([], dtype=np.float32))
 
         # Generate Drops
@@ -722,24 +690,17 @@ class DigitalRain(GameObject):
         self.chars = "0123456789ABCDEF"
 
     def _create_drop(self):
-        # x_local is distance along the wall (0 to 100 approx)
         x_local = random.uniform(-20, 20) 
         y_global = random.uniform(-10, 10)
         speed = random.uniform(0.1, 0.4)
         length = random.randint(5, 20)
         
-        # Use real data if available
+        # Use real data from buffer if available
         if len(self.engine.data_buffer) > 50:
-            # Sample a chunk
-            start_idx = random.randint(0, len(self.engine.data_buffer) - length - 1)
-            # Convert bytes to 0-15 indices (using high nibble for variety)
-            # self.engine.data_buffer is a deque, so we can't slice directly easily?
-            # actually deque supports iteration.
-            # But let's just grab random items to keep it fast.
             chars = []
             for _ in range(length):
                 byte_val = random.choice(self.engine.data_buffer)
-                chars.append(byte_val & 0x0F) # Use lower nibble
+                chars.append(byte_val & 0x0F) 
         else:
             chars = [random.randint(0, 15) for _ in range(length)]
             
@@ -747,14 +708,12 @@ class DigitalRain(GameObject):
 
     def _ensure_atlas(self):
         if self.atlas_texture: return
-        # Generate Atlas 256x32? 
-        # 16 chars. 
+        
         font = self.engine.font
         surf = pygame.Surface((16 * 20, 32), pygame.SRCALPHA)
         
         for i, char in enumerate(self.chars):
             s = font.render(char, True, (255, 255, 255))
-            # Center in 20px slot
             x = i * 20 + (20 - s.get_width())//2
             y = (32 - s.get_height())//2
             surf.blit(s, (x, y))
@@ -786,31 +745,11 @@ class DigitalRain(GameObject):
         glPushAttrib(GL_ENABLE_BIT | GL_COLOR_BUFFER_BIT)
         glDisable(GL_LIGHTING)
         glEnable(GL_BLEND)
-        glBlendFunc(GL_SRC_ALPHA, GL_ONE) # Glowy
+        glBlendFunc(GL_SRC_ALPHA, GL_ONE) 
         glEnable(GL_TEXTURE_2D)
         glBindTexture(GL_TEXTURE_2D, self.atlas_texture)
         
-        # Calculate Transforms
-        # We need to map drops to World Space based on current Camera Z (Infinite scrolling effect)
-        # But drops are static in X/Y?
-        # The prompt implies the rain moves with the player or is fixed in the world?
-        # "Digital Rain in entities.py... draws character by character"
-        # Usually it's stuck to the camera or infinite tunnel walls.
-        # Let's stick it to the infinite tunnel walls relative to camera Z.
-        
         cam_z = self.engine.cam_pos[2] + self.engine.world_offset_z
-        # Snap to segment to make it infinite?
-        # Actually, let's just make the drops local to camera for "HUD" or "Windshield" effect?
-        # No, "Infinite Tunnel". 
-        # Let's project them onto the walls at Z = cam_z + offset.
-        
-        # Wall Geometry Basis
-        # Left: x = -4, look Right? No, Plane normal X.
-        
-        # To make it infinite without managing 1000s of world drops:
-        # We treat the drops as being in a "Toroidal" space around the camera or just wrap Z.
-        # Let's wrap Z relative to camera.
-        
         visible_data = []
         
         # Basis Vectors
@@ -823,14 +762,6 @@ class DigitalRain(GameObject):
             ux, uy, uz = (0, 0, 1)
             vx, vy, vz = (0, 1, 0)
             
-        wrap_z = 60.0 # Depth of rain field
-        
-        # Prepare batch list
-        # We will construct a flat list of floats: x,y,z, u,v, r,g,b,a
-        
-        floats_per_vert = 9
-        
-        # Color
         r, g, b = self.color[:3]
         
         # Pre-calc UVs
@@ -840,111 +771,42 @@ class DigitalRain(GameObject):
             u2 = u1 + self.char_uv_w
             uvs.append((u1, u2))
             
-        # Optimize: Pure Python loop is still slow for 150 drops * 15 chars = 2250 quads.
-        # But faster than 2250 GL calls.
-        
-        drop_z_offsets = []
-        # Reuse drop.x as Z-offset along the wall?
-        # In `_create_drop`: x_local = -20 to 20.
-        
         for drop in self.drops:
-            # Wrap Y (vertical) done in update.
-            # Wrap Z relative to camera
-            # Let's use drop['x'] as Z-depth relative to camera
-            z_rel = drop['x'] # -20 to 20
+            dz = drop['x'] 
             
-            # World Pos
-            # base_z = cam_z + z_rel?
-            # To make it look like we pass them, they should be fixed in world Z?
-            # If we want 10x density, we assume they are World Fixed.
-            # But we only generate 150 drops.
-            # Let's just spawn them around the camera.
-            
-            base_x = wall_x
-            base_y = drop['y'] # Moving down
-            base_z = (cam_z - 20) + (z_rel + 20) # Spread -20 to +20 relative to cam
-            
-            # Wait, if they move with camera, they look static (HUD).
-            # If we want them to pass by, we need World Z.
-            # Let's assume drop['x'] is World Z offset modulo wrap.
-            
-            # Simple Hack: Rain is attached to camera frame but moves down.
-            # This gives the "tunnel effect" if we rotate/perspective correctly.
-            
-            # Actually, `entities.py` original code mapped them to wall segments.
-            # "Drop Z (relative to segment) maps to Quad X axis" -> Wait, that was complex.
-            
-            # New approach: Just draw them in World Space near camera.
-            # drop['x'] is Z-offset from camera.
-            
-            dz = drop['x'] # -20 to 20
-            
-            # Apply distortion based on Z
-            final_z = dz # Local to camera?
-            # Let's just place them relative to camera
-            
-            cx = base_x
-            cy = base_y
-            cz = dz # Local Z (relative to camera origin 0,0,0 if we translate)
-            
-            # We will use glTranslate(cam_pos) then draw relative?
-            # No, we compute World Coords.
+            cx = wall_x
+            cy = drop['y']
+            cz = dz 
             
             wx = cx
             wy = cy
-            wz = cam_z + cz - self.engine.world_offset_z # Approx world z
+            wz = cam_z + cz - self.engine.world_offset_z 
             
-            # Draw Chars
             for i, char_idx in enumerate(drop['c']):
                 char_y = wy + (i * 0.4)
                 if char_y > 5 or char_y < -5: continue
                 
-                # Alpha fade
                 alpha = 1.0 - (i / len(drop['c']))
-                
                 u1, u2 = uvs[char_idx]
                 
                 # Quad Size
                 w = 0.4
                 h = 0.6
                 
-                # Verts (Wall alignment)
-                # Left Wall: Normal X+. Quad in Y/Z plane?
-                # ux, uy, uz = (0, 0, -1)
-                # vx, vy, vz = (0, 1, 0)
+                # Manual expansion for performance
+                if self.side == 'left':
+                     z_off = -w/2
+                else:
+                     z_off = w/2
+                     
+                x, y, z = wx, char_y, wz
                 
-                # Pos
-                x = wx
-                y = char_y
-                z = wz
-                
-                # BL, BR, TR, TL
-                # BL = Center + (-w/2 * U) + (-h/2 * V)
-                
-                # Manual expansion
-                # x is constant (wall surface)
-                
-                # BL
-                x1, y1, z1 = x, y - h/2, z - w/2 * (-1 if self.side=='left' else 1)
-                # BR
-                x2, y2, z2 = x, y - h/2, z + w/2 * (-1 if self.side=='left' else 1)
-                # TR
-                x3, y3, z3 = x, y + h/2, z + w/2 * (-1 if self.side=='left' else 1)
-                # TL
-                x4, y4, z4 = x, y + h/2, z - w/2 * (-1 if self.side=='left' else 1)
-                
-                # U, V
-                # 0,0 -> 1,0 -> 1,1 -> 0,1
-                
-                # Add to list
-                # V1
-                visible_data.extend([x1, y1, z1, u1, 1.0, r, g, b, alpha])
-                # V2
-                visible_data.extend([x2, y2, z2, u2, 1.0, r, g, b, alpha])
-                # V3
-                visible_data.extend([x3, y3, z3, u2, 0.0, r, g, b, alpha])
-                # V4
-                visible_data.extend([x4, y4, z4, u1, 0.0, r, g, b, alpha])
+                visible_data.extend([
+                    x, y - h/2, z - z_off, u1, 1.0, r, g, b, alpha,
+                    x, y - h/2, z + z_off, u2, 1.0, r, g, b, alpha,
+                    x, y + h/2, z + z_off, u2, 0.0, r, g, b, alpha,
+                    x, y + h/2, z - z_off, u1, 0.0, r, g, b, alpha
+                ])
 
         if visible_data:
             data = np.array(visible_data, dtype=np.float32)
@@ -970,13 +832,13 @@ class DigitalRain(GameObject):
         glPopAttrib()
 
 class CyberCity(GameObject):
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.block_size = 20.0
         self.buildings = {} 
         self.cube_mesh = self._create_cube_mesh()
 
-    def _create_cube_mesh(self):
+    def _create_cube_mesh(self) -> Mesh:
         verts = [
             (-0.5, 0, -0.5), (0.5, 0, -0.5), (0.5, 0, 0.5), (-0.5, 0, 0.5),
             (-0.5, 1, -0.5), (0.5, 1, -0.5), (0.5, 1, 0.5), (-0.5, 1, 0.5),
@@ -989,14 +851,14 @@ class CyberCity(GameObject):
         flat_verts = [verts[i] for i in lines]
         return Mesh(flat_verts, GL_LINES)
 
-    def _generate_block(self, index):
+    def _generate_block(self, index: int):
         random.seed(index)
         buildings = []
         for i in range(random.randint(2, 5)):
             x = -random.uniform(6.0, 15.0)
             z_offset = random.uniform(-self.block_size/2, self.block_size/2)
             w = random.uniform(2.0, 5.0); d = random.uniform(2.0, 5.0); h = random.uniform(2.0, 15.0)
-            buildings.append((x, z_offset, w, d, h, COL_CYAN))
+            buildings.append((x, z_offset, w, d, h, config.COL_CYAN))
         for i in range(random.randint(2, 5)):
             x = random.uniform(6.0, 15.0)
             z_offset = random.uniform(-self.block_size/2, self.block_size/2)
@@ -1005,8 +867,8 @@ class CyberCity(GameObject):
         return buildings
 
     def draw(self):
-        if getattr(self.engine, 'zone_state', {}).get('name') != 'SPRAWL': return
-        global_cam_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        if self.engine.zone_state.get('name') != 'SPRAWL': return
+        global_cam_z = self.engine.cam_pos[2] + self.engine.world_offset_z
         current_block = int(global_cam_z / self.block_size)
         
         glPushAttrib(GL_ENABLE_BIT)
@@ -1020,7 +882,7 @@ class CyberCity(GameObject):
                 if i - 10 in self.buildings: del self.buildings[i-10]
             
             block_base_z = i * self.block_size
-            local_base_z = block_base_z - getattr(self.engine, 'world_offset_z', 0.0)
+            local_base_z = block_base_z - self.engine.world_offset_z
             
             for (x, z_off, w, d, h, col) in self.buildings[i]:
                 b_local_z = local_base_z + z_off
@@ -1036,11 +898,11 @@ class CyberCity(GameObject):
         glPopAttrib()
 
 class Blackwall(GameObject):
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.grid_mesh = self._create_wall_grid()
 
-    def _create_wall_grid(self):
+    def _create_wall_grid(self) -> Mesh:
         verts = []
         size = 200.0
         steps = 50
@@ -1054,15 +916,20 @@ class Blackwall(GameObject):
         return Mesh(verts, GL_LINES)
 
     def draw(self):
-        zone_name = getattr(self.engine, 'zone_state', {}).get('name')
+        zone_name = self.engine.zone_state.get('name')
         if zone_name not in ['DEEP_WEB', 'BLACKWALL', 'OLD_NET']: return
-        global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
-        wall_z = -4500.0
-        local_wall_z = wall_z - getattr(self.engine, 'world_offset_z', 0.0)
+        global_z = self.engine.cam_pos[2] + self.engine.world_offset_z
+        
+        # Use config or consistent logic for wall position?
+        # Original was -4500. config has ZONE_THRESHOLDS['DEEP_WEB'] = -4500
+        wall_z = config.ZONE_THRESHOLDS['DEEP_WEB'] 
+        
+        local_wall_z = wall_z - self.engine.world_offset_z
         if local_wall_z > self.engine.cam_pos[2] + 200 or local_wall_z < self.engine.cam_pos[2] - 2000: 
              if zone_name != 'BLACKWALL' and local_wall_z < self.engine.cam_pos[2] - 300: return
 
-        breached = getattr(self.engine, 'blackwall_state', {}).get('breached', False)
+        breached = self.engine.blackwall_state.get('breached', False)
+        
         glPushAttrib(GL_ENABLE_BIT)
         glDisable(GL_TEXTURE_2D)
         glEnable(GL_BLEND)
@@ -1087,7 +954,7 @@ class Blackwall(GameObject):
         glPopAttrib()
 
 class AlienSwarm(GameObject):
-    def __init__(self, engine):
+    def __init__(self, engine: 'WiredEngine'):
         super().__init__(engine)
         self.entities = []
         for i in range(100):
@@ -1099,15 +966,15 @@ class AlienSwarm(GameObject):
              })
 
     def draw(self):
-        if getattr(self.engine, 'zone_state', {}).get('name') != 'OLD_NET': return
+        if self.engine.zone_state.get('name') != 'OLD_NET': return
         glPushAttrib(GL_ENABLE_BIT)
         glDisable(GL_TEXTURE_2D)
         glEnable(GL_BLEND)
         glLineWidth(1.0)
         cam_z = self.engine.cam_pos[2]
-        global_z = cam_z + getattr(self.engine, 'world_offset_z', 0.0)
+        global_z = cam_z + self.engine.world_offset_z
         base_z = global_z
-        local_base_z = base_z - getattr(self.engine, 'world_offset_z', 0.0)
+        local_base_z = base_z - self.engine.world_offset_z
 
         for e in self.entities:
             ox, oy, oz = e['offset']
@@ -1137,14 +1004,14 @@ class StatsWall(GameObject):
         glEnable(GL_BLEND)
         glEnable(GL_TEXTURE_2D)
         glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
-        ram_lbl = self.engine.get_label(f"RAM: {self.engine.monitor.ram}%", (0.0, 1.0, 1.0, 1.0))
+        ram_lbl = self.engine.get_label(f"RAM: {self.engine.monitor.ram}%", config.COL_CYAN)
         glPushMatrix()
         glTranslatef(-3.9, 0, cam_z - 8)
         glRotatef(90, 0, 1, 0)  
         glTranslatef(0, 0, 0.05)
         ram_lbl.draw(0, 0, 0, 0.03)
         glPopMatrix()
-        cpu_lbl = self.engine.get_label(f"CPU: {self.engine.monitor.cpu}%", (1.0, 0.2, 0.2, 1.0))
+        cpu_lbl = self.engine.get_label(f"CPU: {self.engine.monitor.cpu}%", config.COL_RED)
         glPushMatrix()
         glTranslatef(3.9, 0, cam_z - 8)
         glRotatef(-90, 0, 1, 0) 
@@ -1160,7 +1027,7 @@ class WifiVisualizer(GameObject):
         glPushAttrib(GL_ENABLE_BIT | GL_TEXTURE_BIT)
         glEnable(GL_BLEND)
         spacing = 5.0
-        global_cam_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
+        global_cam_z = self.engine.cam_pos[2] + self.engine.world_offset_z
         num_nets = len(networks)
         if num_nets == 0: return
         chunk_size = num_nets * spacing
@@ -1171,11 +1038,13 @@ class WifiVisualizer(GameObject):
             chunk_start_z = chunk_idx * chunk_size
             for i, (ssid, signal) in enumerate(networks):
                 net_global_z = chunk_start_z - (i * spacing)
-                net_local_z = net_global_z - getattr(self.engine, 'world_offset_z', 0.0)
+                net_local_z = net_global_z - self.engine.world_offset_z
                 if net_local_z > self.engine.cam_pos[2] + 20 or net_local_z < self.engine.cam_pos[2] - 100: continue
-                if signal >= 70: color = (0.0, 1.0, 0.0, 1.0)
-                elif signal >= 40: color = (1.0, 1.0, 0.0, 1.0)
-                else: color = (1.0, 0.0, 0.0, 1.0)
+                
+                if signal >= 70: color = config.COL_HEX
+                elif signal >= 40: color = config.COL_YELLOW
+                else: color = config.COL_RED
+                
                 start_x = 3.9
                 glDisable(GL_TEXTURE_2D)
                 glDisable(GL_LIGHTING)
@@ -1216,7 +1085,7 @@ class IntroOverlay(GameObject):
             glDisable(GL_DEPTH_TEST)
             glEnable(GL_BLEND) 
             glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
-            lbl = self.engine.get_label("CLOSE THE WORLD", (1.0, 1.0, 1.0))
+            lbl = self.engine.get_label("CLOSE THE WORLD", config.COL_WHITE)
             glColor4f(1, 1, 1, alpha) 
             glEnable(GL_TEXTURE_2D)
             glBindTexture(GL_TEXTURE_2D, lbl.texture_id)
@@ -1229,7 +1098,7 @@ class IntroOverlay(GameObject):
             glTexCoord2f(0, 0); glVertex2f(x, y); glTexCoord2f(1, 0); glVertex2f(x + w, y)
             glTexCoord2f(1, 1); glVertex2f(x + w, y + h); glTexCoord2f(0, 1); glVertex2f(x, y + h)
             glEnd()
-            lbl2 = self.engine.get_label("OPEN THE NEXT", (1.0, 1.0, 1.0))
+            lbl2 = self.engine.get_label("OPEN THE NEXT", config.COL_WHITE)
             y += 50
             x = (win_width - lbl2.width) / 2
             glBindTexture(GL_TEXTURE_2D, lbl2.texture_id)
