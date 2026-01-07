@@ -17,8 +17,9 @@ class WifiScanner(threading.Thread):
                 # Using check_output to get stdout
                 output = subprocess.check_output(
                     ['netsh', 'wlan', 'show', 'networks', 'mode=bssid'], 
-                    encoding='cp850', # Standard Windows console encoding
-                    creationflags=subprocess.CREATE_NO_WINDOW
+                    encoding='mbcs', # Use system locale
+                    errors='ignore', # Ignore decode errors to prevent crash
+                    creationflags=0x08000000 # CREATE_NO_WINDOW
                 )
                 self._parse_output(output)
             except Exception as e:
