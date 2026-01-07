@@ -350,7 +350,7 @@ class WiredEngine:
         
         # Camera
         glMatrixMode(GL_PROJECTION)
-        gluPerspective(90, (config.WIN_WIDTH/config.WIN_HEIGHT), 0.1, 100.0)
+        gluPerspective(config.FOV, (config.WIN_WIDTH/config.WIN_HEIGHT), 0.1, config.RENDER_DISTANCE)
         glMatrixMode(GL_MODELVIEW)
         
         # Audio

@@ -228,7 +228,8 @@ class InfiniteTunnel(GameObject):
         if zone_name == 'OLD_NET':
             glPointSize(2.0)
         
-        for i in range(-1, 6):
+        # Increased draw distance to match new FOV/Render Distance
+        for i in range(-1, 16):
             seg_idx = current_seg_idx + i
             z_pos = -(seg_idx * self.segment_length)
             glPushMatrix()
@@ -279,14 +280,15 @@ class CyberArch(GameObject):
         glEnable(GL_BLEND)
         glLineWidth(2.0)
         
-        for i in range(current_idx - 2, current_idx + 4):
+        # Draw more arches to fill the distance
+        for i in range(current_idx - 2, current_idx + 8):
             arch_global_z = i * self.spacing
             arch_local_z = arch_global_z - self.engine.world_offset_z
             
             dist = abs(self.engine.cam_pos[2] - arch_local_z)
-            if dist > 120: continue 
+            if dist > config.CULL_DISTANCE: continue 
             
-            alpha = max(0, min(1, 1.0 - (dist / 100.0)))
+            alpha = max(0, min(1, 1.0 - (dist / config.CULL_DISTANCE)))
             if alpha <= 0: continue
 
             colors = [config.COL_CYAN, config.COL_RED, config.COL_YELLOW, (0.5, 0.0, 1.0, 1.0)]
@@ -328,7 +330,7 @@ class Hypercore(GameObject):
         global_z = -15.0
         local_z = global_z - self.engine.world_offset_z
         
-        if local_z > self.engine.cam_pos[2] + 20 or local_z < self.engine.cam_pos[2] - 100:
+        if local_z > self.engine.cam_pos[2] + 20 or local_z < self.engine.cam_pos[2] - config.CULL_DISTANCE:
             return
 
         glPushAttrib(GL_ENABLE_BIT)
@@ -442,7 +444,7 @@ class SatelliteSystem(GameObject):
         global_z = -15.0
         local_z = global_z - self.engine.world_offset_z
         
-        if local_z > self.engine.cam_pos[2] + 20 or local_z < self.engine.cam_pos[2] - 100:
+        if local_z > self.engine.cam_pos[2] + 20 or local_z < self.engine.cam_pos[2] - config.CULL_DISTANCE:
             return
 
         glPushAttrib(GL_ENABLE_BIT)
@@ -566,6 +568,7 @@ class PacketSystem(GameObject):
                 p.history = collections.deque(maxlen=20)
                 current_global_z = self.engine.cam_pos[2] + self.engine.world_offset_z
                 p.base_global_z = current_global_z + random.uniform(20, -20)
+                p.global_z = p.base_global_z # Initialize position relative to camera
                 
                 # Lane Assignment with Jitter
                 jitter = random.uniform(-0.8, 0.8)
@@ -575,9 +578,6 @@ class PacketSystem(GameObject):
                 
                 p.lane_y = random.uniform(-2.0, 2.0)
 
-            if not hasattr(p, 'global_z'):
-                p.global_z = p.base_global_z
-            
             p.global_z -= 0.55 
             
             p.x = p.lane_x
@@ -876,7 +876,8 @@ class CyberCity(GameObject):
         glEnable(GL_BLEND)
         glLineWidth(1.0)
         
-        for i in range(current_block - 2, current_block + 5):
+        # Draw more blocks
+        for i in range(current_block - 2, current_block + 15):
             if i not in self.buildings:
                 self.buildings[i] = self._generate_block(i)
                 if i - 10 in self.buildings: del self.buildings[i-10]
@@ -886,12 +887,12 @@ class CyberCity(GameObject):
             
             for (x, z_off, w, d, h, col) in self.buildings[i]:
                 b_local_z = local_base_z + z_off
-                if b_local_z > self.engine.cam_pos[2] + 10 or b_local_z < self.engine.cam_pos[2] - 120: continue
+                if b_local_z > self.engine.cam_pos[2] + 10 or b_local_z < self.engine.cam_pos[2] - config.CULL_DISTANCE: continue
                 glPushMatrix()
                 glTranslatef(x, -5.0, b_local_z)
                 glScalef(w, h, d)
                 dist = abs(self.engine.cam_pos[2] - b_local_z)
-                alpha = max(0, min(0.6, 1.0 - (dist / 100.0)))
+                alpha = max(0, min(0.6, 1.0 - (dist / config.CULL_DISTANCE)))
                 glColor4f(col[0], col[1], col[2], alpha)
                 self.cube_mesh.draw()
                 glPopMatrix()
@@ -925,7 +926,7 @@ class Blackwall(GameObject):
         wall_z = config.ZONE_THRESHOLDS['DEEP_WEB'] 
         
         local_wall_z = wall_z - self.engine.world_offset_z
-        if local_wall_z > self.engine.cam_pos[2] + 200 or local_wall_z < self.engine.cam_pos[2] - 2000: 
+        if local_wall_z > self.engine.cam_pos[2] + 200 or local_wall_z < self.engine.cam_pos[2] - config.CULL_DISTANCE * 2: 
              if zone_name != 'BLACKWALL' and local_wall_z < self.engine.cam_pos[2] - 300: return
 
         breached = self.engine.blackwall_state.get('breached', False)
@@ -1034,12 +1035,12 @@ class WifiVisualizer(GameObject):
         if chunk_size == 0: chunk_size = 100.0
         current_chunk = int(global_cam_z / chunk_size)
         
-        for chunk_idx in range(current_chunk - 1, current_chunk + 2):
+        for chunk_idx in range(current_chunk - 1, current_chunk + 4):
             chunk_start_z = chunk_idx * chunk_size
             for i, (ssid, signal) in enumerate(networks):
                 net_global_z = chunk_start_z - (i * spacing)
                 net_local_z = net_global_z - self.engine.world_offset_z
-                if net_local_z > self.engine.cam_pos[2] + 20 or net_local_z < self.engine.cam_pos[2] - 100: continue
+                if net_local_z > self.engine.cam_pos[2] + 20 or net_local_z < self.engine.cam_pos[2] - config.CULL_DISTANCE: continue
                 
                 if signal >= 70: color = config.COL_HEX
                 elif signal >= 40: color = config.COL_YELLOW

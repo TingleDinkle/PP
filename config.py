@@ -9,6 +9,9 @@ WIN_WIDTH: int = 1280
 WIN_HEIGHT: int = 720
 TUNNEL_DEPTH: float = 40.0
 FPS_TARGET: int = 60
+FOV: int = 100
+RENDER_DISTANCE: float = 300.0
+CULL_DISTANCE: float = 300.0
 
 # --- Colors (Normalized RGBA) ---
 Color = Tuple[float, float, float, float]
