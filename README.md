@@ -39,8 +39,8 @@ The application renders a continuous "infinite tunnel" representing the depth of
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/TingleDinkle/PP.git
-    cd PP
+    git clone https://github.com/TingleDinkle/Navi.git
+    cd Navi
     ```
 
 2.  **Create a virtual environment (Recommended):**
