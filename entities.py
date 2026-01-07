@@ -11,7 +11,6 @@ from OpenGL.GLU import *
 from OpenGL.arrays import vbo
 
 import config
-
 import model_loader
 
 if TYPE_CHECKING:
