@@ -3,12 +3,13 @@ import queue
 import random
 import time
 import math
-from scapy.all import sniff, IP, TCP, UDP, conf
+from scapy.all import sniff, IP, TCP, UDP, ICMP, conf
 
 # --- Constants ---
 # Colors
 COLOR_TCP = (0.0, 1.0, 1.0, 1.0)   # Cyan (normalized RGBA)
 COLOR_UDP = (1.0, 153/255.0, 0.0, 1.0)   # Orange (normalized RGBA)
+COLOR_ICMP = (1.0, 0.2, 0.8, 1.0) # Magenta/Pink for ICMP
 COLOR_OTHER = (100/255.0, 100/255.0, 100/255.0, 1.0) # Grey for others (normalized RGBA)
 
 # Packet Spawn Config
@@ -48,6 +49,8 @@ class PacketObject:
             self.color = COLOR_TCP
         elif self.protocol == 'UDP':
             self.color = COLOR_UDP
+        elif self.protocol == 'ICMP':
+            self.color = COLOR_ICMP
             
         # self.speed is no longer used for Z-movement, but keep if for potential future use
         self.speed = max(0.05, 0.3 - (self.size / 3000.0))
@@ -72,7 +75,6 @@ class ProtocolListener(threading.Thread):
     def run(self):
         # Scapy sniff callback
         def process_packet(packet):
-            import math # Speculative fix: re-import math within callback
             if not self.running:
                 return False # Stop sniffing
             
@@ -86,6 +88,8 @@ class ProtocolListener(threading.Thread):
                     proto = 'TCP'
                 elif UDP in packet:
                     proto = 'UDP'
+                elif ICMP in packet:
+                    proto = 'ICMP'
                 
                 # Extract payload summary
                 payload_data = packet.summary()
@@ -108,7 +112,7 @@ class ProtocolListener(threading.Thread):
         # Ideally, we use `stop_filter` lambda, but `daemon=True` is usually enough for simple apps.
         try:
             while self.running: # Loop to continuously sniff while thread is running
-                sniff(prn=process_packet, store=0, stop_filter=lambda x: not self.running)
+                sniff(prn=process_packet, store=0, iface=conf.iface, stop_filter=lambda x: not self.running)
         except Exception as e:
             print(f"Sniffer Error: {e}")
             print("Make sure Npcap is installed on Windows for Scapy.")

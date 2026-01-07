@@ -587,10 +587,14 @@ class PacketSystem(GameObject):
                 p.history = collections.deque(maxlen=20)
                 current_global_z = self.engine.cam_pos[2] + getattr(self.engine, 'world_offset_z', 0.0)
                 p.base_global_z = current_global_z + random.uniform(20, -20)
-                if p.protocol == 'TCP': p.lane_x = -2.5
-                elif p.protocol == 'UDP': p.lane_x = 2.5
-                else: p.lane_x = 0.0
-                p.lane_y = random.uniform(-1.5, 1.5)
+                
+                # Lane assignment with jitter to prevent "single laser" look
+                jitter = random.uniform(-0.8, 0.8)
+                if p.protocol == 'TCP': p.lane_x = -3.0 + jitter
+                elif p.protocol == 'UDP': p.lane_x = 3.0 + jitter
+                else: p.lane_x = 0.0 + jitter
+                
+                p.lane_y = random.uniform(-2.0, 2.0)
 
             if not hasattr(p, 'global_z'):
                 p.global_z = p.base_global_z
@@ -633,6 +637,62 @@ class PacketSystem(GameObject):
             self.trail_vbo.update(pos_data, col_data)
             self.trail_vbo.draw()
 
+        # Draw Packet Heads (Projectiles) & Labels
+        glPointSize(10.0)
+        
+        # We need to draw points first, then labels (transparent)
+        # 1. Draw Points
+        glBegin(GL_POINTS)
+        for p in self.engine.packets:
+            if hasattr(p, 'history') and len(p.history) > 0:
+                hx, hy = p.x, p.y
+                hz = p.global_z - world_offset
+                glColor4f(*p.color)
+                glVertex3f(hx, hy, hz)
+        glEnd()
+
+        # 2. Draw Labels (Data)
+        glEnable(GL_TEXTURE_2D)
+        glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+        
+        cam_pos = self.engine.cam_pos
+        
+        for p in self.engine.packets:
+            if hasattr(p, 'history') and len(p.history) > 0:
+                hx, hy = p.x, p.y
+                hz = p.global_z - world_offset
+                
+                # Distance check
+                dx = hx - cam_pos[0]
+                dy = hy - cam_pos[1]
+                dz = hz - cam_pos[2]
+                dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+                
+                if dist < 60.0 and dist > 1.5: # Render labels if within range
+                    glPushMatrix()
+                    # Offset label slightly more for readability
+                    glTranslatef(hx + 0.8, hy + 0.8, hz)
+                    
+                    # Billboard (Face Camera)
+                    glRotatef(-self.engine.cam_yaw, 0, 1, 0)
+                    glRotatef(-self.engine.cam_pitch, 1, 0, 0)
+                    
+                    # Larger scale for visibility
+                    scale = 0.015 * (dist / 12.0) 
+                    scale = max(0.01, min(0.03, scale))
+                    glScalef(scale, scale, scale)
+                    
+                    label_text = f"{p.protocol} > {p.dst}"
+                    # Truncate if too long
+                    if len(label_text) > 24: label_text = label_text[:24] + ".."
+                    
+                    lbl = self.engine.get_label(label_text, p.color)
+                    lbl.draw(0, 0, 0, 1.0)
+                    
+                    glPopMatrix()
+                    
+        glDisable(GL_TEXTURE_2D)
+
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
         glPopAttrib()
 
@@ -667,7 +727,22 @@ class DigitalRain(GameObject):
         y_global = random.uniform(-10, 10)
         speed = random.uniform(0.1, 0.4)
         length = random.randint(5, 20)
-        chars = [random.randint(0, 15) for _ in range(length)]
+        
+        # Use real data if available
+        if len(self.engine.data_buffer) > 50:
+            # Sample a chunk
+            start_idx = random.randint(0, len(self.engine.data_buffer) - length - 1)
+            # Convert bytes to 0-15 indices (using high nibble for variety)
+            # self.engine.data_buffer is a deque, so we can't slice directly easily?
+            # actually deque supports iteration.
+            # But let's just grab random items to keep it fast.
+            chars = []
+            for _ in range(length):
+                byte_val = random.choice(self.engine.data_buffer)
+                chars.append(byte_val & 0x0F) # Use lower nibble
+        else:
+            chars = [random.randint(0, 15) for _ in range(length)]
+            
         return {'x': x_local, 'y': y_global, 's': speed, 'c': chars}
 
     def _ensure_atlas(self):
