@@ -19,7 +19,7 @@ The application renders an infinite, procedurally generated tunnel representing 
 *   **The Blackwall:** A red, unstable firewall boundary protecting the core.
 *   **Old Net:** Monochrome, static-laden ruins of legacy protocols.
 
-### 📡 Data Entities
+###  Data Entities
 *   **Holographic Packet Stream:** Real-time network traffic visualized as high-velocity projectiles.
     *   **TCP:** Cyan Energy (Reliable, structured streams).
     *   **UDP:** Orange Plasma (Fast, fire-and-forget streams).
