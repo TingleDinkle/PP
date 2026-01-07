@@ -2,53 +2,80 @@ import trimesh
 import numpy as np
 from typing import List, Tuple, Optional
 
-def load_glb_as_lines(file_path: str, scale: float = 1.0) -> Optional[List[Tuple[float, float, float]]]:
+def load_glb_as_lines(file_path: str, target_scale: float = 20.0) -> Optional[List[Tuple[float, float, float]]]:
     """
-    Loads a GLB/GLTF file and extracts its edges for wireframe rendering.
-    Returns a flat list of vertices (start, end, start, end...) for GL_LINES.
+    Loads a GLB/GLTF file, flattens it, normalizes its size/position, 
+    and extracts its unique edges for wireframe rendering.
+    
+    Args:
+        file_path: Path to the .glb file.
+        target_scale: The desired maximum dimension (bounding box size) of the model.
+        
+    Returns:
+        A flat list of vertices (start, end, start, end...) for GL_LINES.
     """
     try:
-        # Load the mesh
-        # trimesh.load can return a Scene or a Mesh. We handle both.
-        scene_or_mesh = trimesh.load(file_path)
+        # Load the mesh (Scene or Mesh)
+        scene_or_mesh = trimesh.load(file_path, force='mesh') # force='mesh' tries to squash scenes
         
-        meshes = []
+        # Ensure we have a single mesh
         if isinstance(scene_or_mesh, trimesh.Scene):
-            # Aggregate all meshes in the scene
-            for geometry in scene_or_mesh.geometry.values():
-                meshes.append(geometry)
+            # Concatenate all geometries into one mesh
+            # This handles transform hierarchies automatically
+            mesh = scene_or_mesh.dump(concatenate=True)
         else:
-            meshes.append(scene_or_mesh)
-            
-        all_lines = []
+            mesh = scene_or_mesh
+
+        if not hasattr(mesh, 'edges_unique'):
+            print(f"Model {file_path} has no edges.")
+            return None
+
+        # --- Optimization: Normalization ---
+        # 1. Center the mesh
+        center = mesh.centroid
+        mesh.vertices -= center
         
-        for mesh in meshes:
-            if not hasattr(mesh, 'edges_unique'):
-                continue
-                
-            # Get unique edges (pairs of vertex indices)
-            edges = mesh.edges_unique
-            # Get vertices
-            verts = mesh.vertices
-            
-            # Map indices to actual coordinates
-            # shape (N, 2, 3) -> N lines, start/end, xyz
-            line_segments = verts[edges]
-            
-            # Apply scale
-            line_segments *= scale
-            
-            # Center the model? Optional. Let's not auto-center for now, assume origin is correct.
-            # But usually GLB origins are at feet.
-            
-            # Flatten to list of tuples
-            for start, end in line_segments:
-                all_lines.append((start[0], start[1], start[2]))
-                all_lines.append((end[0], end[1], end[2]))
-                
-        print(f"Loaded {file_path}: {len(all_lines)//2} edges.")
-        return all_lines
+        # 2. Scale to target size
+        # Get bounding box extents
+        extents = mesh.extents # [x, y, z] sizes
+        max_extent = np.max(extents)
+        
+        if max_extent > 0:
+            scale_factor = target_scale / max_extent
+            mesh.vertices *= scale_factor
+            print(f"Auto-scaled model by {scale_factor:.4f}x to fit size {target_scale}")
+        
+        # --- Optimization: Vertex Count ---
+        # If the model is absurdly dense (> 50k edges), we might want to warn or simplify
+        # For now, we trust the user, but print stats
+        print(f"Processing {len(mesh.edges_unique)} unique edges...")
+
+        # Extract Geometry
+        edges = mesh.edges_unique
+        verts = mesh.vertices
+        
+        # Map indices to actual coordinates
+        # shape (N, 2, 3) -> N lines, start/end, xyz
+        line_segments = verts[edges]
+        
+        # Flatten to list of floats for VBO
+        # We need a flat list of tuples? No, existing code expected list of tuples.
+        # Let's keep strict compatibility with previous entities.py expectation if possible,
+        # OR optimize by returning numpy array directly?
+        # entities.py Mesh expects: `self.data = np.array(vertices, dtype=np.float32)`
+        # If we return a numpy array of shape (N*2, 3), that works perfectly.
+        
+        # Reshape to (N*2, 3) -> flat list of vertices
+        flat_verts = line_segments.reshape(-1, 3)
+        
+        # Convert to list of tuples to match strict type hint of entities.py Mesh __init__
+        # (Though np.array handles list of lists too, explicit tuples are safer for the type hint)
+        # Actually, let's just return the numpy array if Mesh accepts it?
+        # entities.py: Mesh.__init__ takes vertices: List... then does np.array(vertices).
+        # We can just return the list.
+        
+        return flat_verts.tolist()
         
     except Exception as e:
-        print(f"Failed to load model {file_path}: {e}")
+        print(f"Failed to load/optimize model {file_path}: {e}")
         return None

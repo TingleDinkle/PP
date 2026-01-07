@@ -1157,7 +1157,8 @@ class CustomModel(GameObject):
     def _load_model(self):
         # Try to load 'model.glb'
         print("Attempting to load 'model.glb'...")
-        verts = model_loader.load_glb_as_lines("model.glb", scale=5.0)
+        # Auto-scale to 30 units (comparable to tunnel width)
+        verts = model_loader.load_glb_as_lines("model.glb", target_scale=30.0)
         if verts:
             self.mesh = Mesh(verts, GL_LINES)
             self.loaded = True
