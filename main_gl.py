@@ -399,6 +399,7 @@ class WiredEngine:
         
         # Narrative State
         self.breach_mode = False
+        self.ghost_room_reached = False
         self.blackwall_timer = 0
         self.in_blackwall_zone = False
         self.blackwall_state = {
@@ -510,21 +511,47 @@ class WiredEngine:
         keys = pygame.key.get_pressed()
         speed = 2.0 
         
-        mdx, mdy = pygame.mouse.get_rel()
-        self.cam_yaw += mdx * 0.1
-        self.cam_pitch -= mdy * 0.1 
-        self.cam_pitch = max(-89, min(89, self.cam_pitch))
+        # Ghost Room Ending Logic
+        ghost_room_z = config.ZONE_THRESHOLDS['GHOST_ROOM'] - 100.0
+        current_global_z = self.cam_pos[2] + self.world_offset_z
         
-        rad_yaw = math.radians(self.cam_yaw)
-        fx = math.sin(rad_yaw); fz = -math.cos(rad_yaw)
-        rx = math.cos(rad_yaw); rz = math.sin(rad_yaw)
-        
-        dx = 0; dz = 0
-        if keys[K_w]: dx += fx * speed; dz += fz * speed
-        if keys[K_s]: dx -= fx * speed; dz -= fz * speed
-        if keys[K_a]: dx -= rx * speed; dz -= rz * speed
-        if keys[K_d]: dx += rx * speed; dz += rz * speed
+        if self.ghost_room_reached:
+            # Lock controls completely
+            mdx, mdy = (0, 0)
+            dx = 0; dz = 0
+            # Force position to "sweet spot" (viewing the computer)
+            # We want to be at ghost_room_z + 40 (looking back at it at -100)
+            target_local_z = ghost_room_z - self.world_offset_z + 40.0
             
+            # Smoothly interpolate to locked position
+            self.cam_pos[0] = self.cam_pos[0] * 0.9 + 0.0 * 0.1
+            self.cam_pos[2] = self.cam_pos[2] * 0.9 + target_local_z * 0.1
+            
+            # Smoothly face the center
+            self.cam_yaw = self.cam_yaw * 0.9 + 0.0 * 0.1
+            self.cam_pitch = self.cam_pitch * 0.9 + 0.0 * 0.1
+            
+        else:
+            # Normal Controls
+            mdx, mdy = pygame.mouse.get_rel()
+            self.cam_yaw += mdx * 0.1
+            self.cam_pitch -= mdy * 0.1 
+            self.cam_pitch = max(-89, min(89, self.cam_pitch))
+            
+            rad_yaw = math.radians(self.cam_yaw)
+            fx = math.sin(rad_yaw); fz = -math.cos(rad_yaw)
+            rx = math.cos(rad_yaw); rz = math.sin(rad_yaw)
+            
+            dx = 0; dz = 0
+            if keys[K_w]: dx += fx * speed; dz += fz * speed
+            if keys[K_s]: dx -= fx * speed; dz -= fz * speed
+            if keys[K_a]: dx -= rx * speed; dz -= rz * speed
+            if keys[K_d]: dx += rx * speed; dz += rz * speed
+            
+            # Check if we reached the room
+            if abs(current_global_z - ghost_room_z) < 50.0:
+                self.ghost_room_reached = True
+
         # Wall Collision
         next_z = self.cam_pos[2] + dz
         global_z = next_z + self.world_offset_z

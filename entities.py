@@ -1256,7 +1256,7 @@ class GhostRoom(GameObject):
             # Load from the new organized path
             path = "assets/models/macintosh_128k.glb"
             print(f"Loading artifact from {path}...")
-            verts = model_loader.load_glb_as_lines(path, target_scale=8.0)
+            verts = model_loader.load_glb_as_lines(path, target_scale=25.0)
             if verts:
                 self.mac_mesh = Mesh(verts, GL_LINES)
                 self.loaded = True
@@ -1328,15 +1328,15 @@ class GhostRoom(GameObject):
             lbl = self.engine.get_label("USER: ghost", config.COL_GHOST)
             
             # Position relative to the model (empirically determined or guessed)
-            # The model is scaled to ~8.0 units.
-            glTranslatef(0, 1.5, 2.0) 
+            # The model is scaled to ~25.0 units.
+            glTranslatef(0, 5.0, 6.0) 
             # Billboard it to face camera? Or fixed to screen?
             # Fixed to screen looks better if the model rotates.
             # But the model rotates around Y. 
             # If we want it ON the screen, we need to know where the screen is.
             # Let's just make it float above the computer.
             
-            glScalef(0.02, 0.02, 0.02)
+            glScalef(0.05, 0.05, 0.05)
             glTranslatef(-lbl.width/2, 0, 0)
             lbl.draw(0, 0, 0, 1.0)
             
