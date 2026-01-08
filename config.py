@@ -42,4 +42,5 @@ ZONE_THRESHOLDS = {
     'SPRAWL': -3000,
     'DEEP_WEB': -4500,
     'BLACKWALL': -5500,
+    'GHOST_ROOM': -7000,
 }

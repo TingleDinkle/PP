@@ -646,22 +646,24 @@ class PacketSystem(GameObject):
                 dist = math.sqrt(dx*dx + dy*dy + dz*dz)
                 
                 if dist < 60.0 and dist > 1.5:
-                    glPushMatrix()
-                    glTranslatef(hx + 0.8, hy + 0.8, hz)
-                    
-                    glRotatef(-self.engine.cam_yaw, 0, 1, 0)
-                    glRotatef(-self.engine.cam_pitch, 1, 0, 0)
-                    
-                    scale = 0.015 * (dist / 12.0) 
-                    scale = max(0.01, min(0.03, scale))
-                    glScalef(scale, scale, scale)
-                    
-                    label_text = f"{p.protocol} > {p.dst}"
-                    if len(label_text) > 24: label_text = label_text[:24] + ".."
-                    
-                    lbl = self.engine.get_label(label_text, p.color)
-                    lbl.draw(0, 0, 0, 1.0)
-                    glPopMatrix()
+                    # Optimization: Only draw labels if close enough
+                    if dist < 40.0:
+                        glPushMatrix()
+                        glTranslatef(hx + 0.8, hy + 0.8, hz)
+                        
+                        glRotatef(-self.engine.cam_yaw, 0, 1, 0)
+                        glRotatef(-self.engine.cam_pitch, 1, 0, 0)
+                        
+                        scale = 0.015 * (dist / 12.0) 
+                        scale = max(0.01, min(0.03, scale))
+                        glScalef(scale, scale, scale)
+                        
+                        label_text = f"{p.protocol} > {p.dst}"
+                        if len(label_text) > 24: label_text = label_text[:24] + ".."
+                        
+                        lbl = self.engine.get_label(label_text, p.color)
+                        lbl.draw(0, 0, 0, 1.0)
+                        glPopMatrix()
                     
         glDisable(GL_TEXTURE_2D)
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -970,7 +972,7 @@ class Blackwall(GameObject):
             # Chaos Mode
             pulse = 1.0 + math.sin(t * 20.0) * 0.5
             rotate_speed = t * 100.0
-            scale_factor = 4.0 + math.sin(t * 5.0) # Massive expansion
+            scale_factor = 2.5 + math.sin(t * 5.0) # Reduced expansion
             color = (1.0, 0.0, 0.0, 0.8) if int(t*10)%2==0 else (0.0, 0.0, 0.0, 1.0)
         else:
             # Warning Mode
@@ -986,7 +988,8 @@ class Blackwall(GameObject):
         glLineWidth(2.0 if breached else 1.5)
         
         glPushMatrix()
-        glTranslatef(0, 0, local_wall_z)
+        # Offset visual geometry slightly back from the logical wall z to prevent clipping
+        glTranslatef(0, 0, local_wall_z - 20.0)
         
         # Main Scale
         glScalef(scale_factor, scale_factor, scale_factor)
@@ -1235,3 +1238,132 @@ class IntroOverlay(GameObject):
             glMatrixMode(GL_PROJECTION); glPopMatrix()
             glMatrixMode(GL_MODELVIEW); glPopMatrix()
             glEnable(GL_DEPTH_TEST)
+
+class GhostRoom(GameObject):
+    """
+    The hidden room containing the Macintosh 128k artifact and the Ghost user.
+    Reached after breaching the Blackwall.
+    """
+    def __init__(self, engine: 'WiredEngine'):
+        super().__init__(engine)
+        self.mac_mesh = None
+        self.geometry_mesh = self._generate_complex_geometry()
+        self.loaded = False
+        self._load_macintosh()
+        
+    def _load_macintosh(self):
+        try:
+            # Load from the new organized path
+            path = "assets/models/macintosh_128k.glb"
+            print(f"Loading artifact from {path}...")
+            verts = model_loader.load_glb_as_lines(path, target_scale=8.0)
+            if verts:
+                self.mac_mesh = Mesh(verts, GL_LINES)
+                self.loaded = True
+            else:
+                print("Failed to load Macintosh model.")
+        except Exception as e:
+            print(f"GhostRoom Load Error: {e}")
+
+    def _generate_complex_geometry(self) -> Mesh:
+        """Generates abstract floating shapes."""
+        verts = []
+        # Create a few nested shapes
+        for scale in [15.0, 25.0, 35.0]:
+            # Icosahedron-like vertices
+            t = (1.0 + math.sqrt(5.0)) / 2.0
+            points = [
+                (-1,  t,  0), ( 1,  t,  0), (-1, -t,  0), ( 1, -t,  0),
+                ( 0, -1,  t), ( 0,  1,  t), ( 0, -1, -t), ( 0,  1, -t),
+                ( t,  0, -1), ( t,  0,  1), (-t,  0, -1), (-t,  0,  1)
+            ]
+            # Connect them chaotically
+            for i in range(len(points)):
+                for j in range(i+1, len(points)):
+                    p1 = points[i]
+                    p2 = points[j]
+                    dist = math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2)
+                    if dist < 2.5: # Only connect neighbors
+                        verts.append((p1[0]*scale, p1[1]*scale, p1[2]*scale))
+                        verts.append((p2[0]*scale, p2[1]*scale, p2[2]*scale))
+        return Mesh(verts, GL_LINES)
+
+    def draw(self):
+        zone_threshold = config.ZONE_THRESHOLDS['GHOST_ROOM']
+        # The room is centered slightly after the threshold
+        room_z = zone_threshold - 100.0
+        local_z = room_z - self.engine.world_offset_z
+        
+        # Visibility check
+        dist = abs(self.engine.cam_pos[2] - local_z)
+        if dist > config.CULL_DISTANCE: return
+
+        glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT)
+        glDisable(GL_TEXTURE_2D)
+        glEnable(GL_BLEND)
+        glLineWidth(1.5)
+
+        glPushMatrix()
+        glTranslatef(0, 0, local_z)
+
+        # 1. Draw the Macintosh
+        if self.loaded and self.mac_mesh:
+            glPushMatrix()
+            # Floating animation
+            y_float = math.sin(time.time() * 1.5) * 0.5
+            glTranslatef(0, y_float, 0)
+            glRotatef(time.time() * 10.0, 0, 1, 0)
+            
+            # Retro Beige/Green tint
+            glColor4f(0.8, 1.0, 0.8, 1.0) 
+            self.mac_mesh.draw()
+            
+            # Draw "GHOST" text on the screen
+            # Assuming model is roughly centered. 
+            # We'll project the text slightly in front.
+            glPushMatrix()
+            glEnable(GL_TEXTURE_2D)
+            glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
+            
+            lbl = self.engine.get_label("USER: ghost", config.COL_GHOST)
+            
+            # Position relative to the model (empirically determined or guessed)
+            # The model is scaled to ~8.0 units.
+            glTranslatef(0, 1.5, 2.0) 
+            # Billboard it to face camera? Or fixed to screen?
+            # Fixed to screen looks better if the model rotates.
+            # But the model rotates around Y. 
+            # If we want it ON the screen, we need to know where the screen is.
+            # Let's just make it float above the computer.
+            
+            glScalef(0.02, 0.02, 0.02)
+            glTranslatef(-lbl.width/2, 0, 0)
+            lbl.draw(0, 0, 0, 1.0)
+            
+            glDisable(GL_TEXTURE_2D)
+            glPopMatrix()
+            
+            glPopMatrix()
+
+        # 2. Draw Complex Geometry
+        glPushMatrix()
+        glRotatef(time.time() * 5.0, 1, 0, 1)
+        glRotatef(math.sin(time.time() * 0.2) * 30, 0, 1, 0)
+        glColor4f(0.5, 0.0, 1.0, 0.4) # Purple ether
+        self.geometry_mesh.draw()
+        glPopMatrix()
+        
+        # 3. Draw subtle data particles
+        glPointSize(3.0)
+        glBegin(GL_POINTS)
+        glColor4f(1.0, 1.0, 1.0, 0.5)
+        for i in range(50):
+            t = time.time() + i
+            px = math.sin(t * 0.3 + i) * 20.0
+            py = math.cos(t * 0.5 + i) * 20.0
+            pz = math.sin(t * 0.7 + i) * 20.0
+            glVertex3f(px, py, pz)
+        glEnd()
+
+        glPopMatrix()
+        glPopAttrib()

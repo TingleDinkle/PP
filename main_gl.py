@@ -425,6 +425,7 @@ class WiredEngine:
             entities.DigitalRain(self, side='left', color=config.COL_HEX),
             entities.DigitalRain(self, side='right', color=config.COL_RED),
             entities.CustomModel(self),
+            entities.GhostRoom(self),
             entities.IntroOverlay(self)
         ]
         
@@ -529,9 +530,19 @@ class WiredEngine:
         global_z = next_z + self.world_offset_z
         wall_z = config.ZONE_THRESHOLDS['DEEP_WEB'] 
         
-        if not self.blackwall_state['breached'] and global_z < config.ZONE_THRESHOLDS['DEEP_WEB'] + 20:
-             # Stop forward movement if not breached
-             pass 
+        # Soft Wall / Resistance Logic
+        if not self.blackwall_state['breached'] and global_z < wall_z + 100:
+             dist = global_z - wall_z
+             # The closer you get, the harder it pushes back
+             # dist is positive (e.g. 100 -> 0)
+             if dist < 50:
+                 resistance = (50 - dist) * 0.05
+                 # Push back
+                 dz += resistance
+                 
+                 # Screen Shake / Feedback
+                 self.cam_pos[0] += random.uniform(-0.05, 0.05)
+                 self.cam_pos[1] += random.uniform(-0.05, 0.05)
         
         self.cam_pos[0] += dx
         self.cam_pos[2] += dz
@@ -552,6 +563,15 @@ class WiredEngine:
         # Blackwall Narrative Logic
         if not self.blackwall_state['breached'] and global_z < (wall_z + 1000):
              dist = global_z - wall_z 
+             
+             # Force Breach (Pushing through)
+             if dist < 10:
+                 self.blackwall_state['breached'] = True
+                 self.blackwall_state['message'] = "SYSTEM FAILURE // FORCED ENTRY"
+                 if self.explode_sound: self.explode_sound.play()
+                 # Push player forward into the void
+                 self.cam_pos[2] -= 20.0 
+
              # Warning logic
              if dist < 300 and self.blackwall_state['warnings'] == 0:
                  self.blackwall_state['warnings'] = 1
@@ -584,8 +604,10 @@ class WiredEngine:
         elif global_z > config.ZONE_THRESHOLDS['BLACKWALL']:
             self.zone_state = {'name': 'BLACKWALL', 'grid_color': (0.8, 0.0, 0.0, 0.5), 'tint': (1.2, 0.8, 0.8), 'distortion': 3.0}
             self.in_blackwall_zone = True
-        else:
+        elif global_z > config.ZONE_THRESHOLDS['GHOST_ROOM']:
             self.zone_state = {'name': 'OLD_NET', 'grid_color': (0.8, 0.8, 0.9, 0.6), 'tint': (0.6, 0.6, 0.7), 'distortion': 4.0}
+        else:
+            self.zone_state = {'name': 'GHOST_ROOM', 'grid_color': (0.0, 0.1, 0.0, 0.1), 'tint': (0.8, 1.0, 0.8), 'distortion': 1.0}
 
         # Breach Event
         if self.in_blackwall_zone and not self.breach_mode:
@@ -626,6 +648,7 @@ class WiredEngine:
     def draw(self):
         self.post_process.begin()
         
+        glMatrixMode(GL_MODELVIEW)
         glLoadIdentity()
         rad_yaw = math.radians(self.cam_yaw)
         rad_pitch = math.radians(self.cam_pitch)
@@ -675,7 +698,7 @@ class WiredEngine:
          glEnd()
          
          glDisable(GL_TEXTURE_2D); glEnable(GL_DEPTH_TEST)
-         glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix()
+         glPopMatrix(); glMatrixMode(GL_PROJECTION); glPopMatrix(); glMatrixMode(GL_MODELVIEW)
 
     def loop(self):
         try:
