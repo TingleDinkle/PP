@@ -15,7 +15,6 @@ from OpenGL.GL import *
 from OpenGL.GLU import *
 from OpenGL.GL.shaders import compileProgram, compileShader
 
-# Local Imports
 import config
 import entities
 import protocol
@@ -23,7 +22,6 @@ import sounds
 import wifi_scanner
 from world import World
 
-# --- GLSL Shaders ---
 VS_BASE = """
 #version 120
 void main() {
@@ -341,7 +339,6 @@ class WiredEngine:
         pygame.mouse.set_visible(False)
         pygame.event.set_grab(True)
         
-        # OpenGL Config
         glEnable(GL_DEPTH_TEST) 
         glEnable(GL_BLEND) 
         glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA)
@@ -349,12 +346,10 @@ class WiredEngine:
         glEnable(GL_COLOR_MATERIAL) 
         glShadeModel(GL_FLAT) 
         
-        # Camera
         glMatrixMode(GL_PROJECTION)
         gluPerspective(config.FOV, (config.WIN_WIDTH/config.WIN_HEIGHT), 0.1, config.RENDER_DISTANCE)
         glMatrixMode(GL_MODELVIEW)
         
-        # Audio
         self.drone_sound = sounds.generate_drone(55, 10.0)
         self.screech_sound = sounds.generate_screech()
         self.explode_sound = sounds.generate_explosion()
@@ -363,7 +358,6 @@ class WiredEngine:
             self.drone_channel = self.drone_sound.play(loops=-1, fade_ms=2000)
             self.drone_channel.set_volume(0.3)
 
-        # Subsystems
         self.cap = cv2.VideoCapture(0)
         self.monitor = SystemMonitor()
         self.monitor.start()
@@ -376,18 +370,17 @@ class WiredEngine:
         self.wifi_scanner.start()
 
         # Rendering Resources
-        self.font = pygame.font.SysFont("Consolas", 20, bold=True)
+        # Use Segoe UI (Windows default) for better Unicode support
+        self.font = pygame.font.SysFont("Segoe UI", 20, bold=True)
         self.cam_tex = WebcamTexture()
         self.labels: Dict[Tuple[str, config.Color], TextTexture] = {} 
         self.post_process = PostProcess(config.WIN_WIDTH, config.WIN_HEIGHT)
         
-        # Engine State
         self.running = True
         self.start_time = time.time()
         self.clock = pygame.time.Clock()
         self.last_texture_cleanup = time.time()
 
-        # Initialize World State
         self.world = World(self)
         self.world.init_entities()
 

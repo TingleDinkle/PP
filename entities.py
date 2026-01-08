@@ -92,6 +92,42 @@ class DynamicMesh:
         except Exception as e:
             print(f"DynamicVBO Draw Error: {e}")
 
+class SolidMesh:
+    """Helper to manage VBOs for solid geometry with lighting and vertex colors."""
+    def __init__(self, vertices: np.ndarray, normals: np.ndarray, colors: np.ndarray):
+        self.vertex_count = len(vertices)
+        self.vbo_pos = vbo.VBO(vertices.astype(np.float32))
+        self.vbo_norm = vbo.VBO(normals.astype(np.float32))
+        self.vbo_col = vbo.VBO(colors.astype(np.float32))
+
+    def draw(self):
+        if self.vertex_count == 0: return
+        try:
+            glEnableClientState(GL_VERTEX_ARRAY)
+            glEnableClientState(GL_NORMAL_ARRAY)
+            glEnableClientState(GL_COLOR_ARRAY)
+            
+            self.vbo_pos.bind()
+            glVertexPointer(3, GL_FLOAT, 0, None)
+            
+            self.vbo_norm.bind()
+            glNormalPointer(GL_FLOAT, 0, None)
+            
+            self.vbo_col.bind()
+            glColorPointer(4, GL_FLOAT, 0, None)
+            
+            glDrawArrays(GL_TRIANGLES, 0, self.vertex_count)
+            
+            self.vbo_col.unbind()
+            self.vbo_norm.unbind()
+            self.vbo_pos.unbind()
+            
+            glDisableClientState(GL_COLOR_ARRAY)
+            glDisableClientState(GL_NORMAL_ARRAY)
+            glDisableClientState(GL_VERTEX_ARRAY)
+        except Exception as e:
+            print(f"SolidMesh Draw Error: {e}")
+
 class ParticleSystem(GameObject):
     """Manages simple one-shot particle explosions."""
     def __init__(self, engine: 'WiredEngine'):
@@ -1253,12 +1289,11 @@ class GhostRoom(GameObject):
         
     def _load_macintosh(self):
         try:
-            # Load from the new organized path
             path = "assets/models/macintosh_128k.glb"
             print(f"Loading artifact from {path}...")
-            verts = model_loader.load_glb_as_lines(path, target_scale=25.0)
-            if verts:
-                self.mac_mesh = Mesh(verts, GL_LINES)
+            data = model_loader.load_glb_full(path, target_scale=7.0)
+            if data:
+                self.mac_mesh = SolidMesh(*data)
                 self.loaded = True
             else:
                 print("Failed to load Macintosh model.")
@@ -1266,86 +1301,71 @@ class GhostRoom(GameObject):
             print(f"GhostRoom Load Error: {e}")
 
     def _generate_complex_geometry(self) -> Mesh:
-        """Generates abstract floating shapes."""
         verts = []
-        # Create a few nested shapes
         for scale in [15.0, 25.0, 35.0]:
-            # Icosahedron-like vertices
             t = (1.0 + math.sqrt(5.0)) / 2.0
             points = [
                 (-1,  t,  0), ( 1,  t,  0), (-1, -t,  0), ( 1, -t,  0),
                 ( 0, -1,  t), ( 0,  1,  t), ( 0, -1, -t), ( 0,  1, -t),
                 ( t,  0, -1), ( t,  0,  1), (-t,  0, -1), (-t,  0,  1)
             ]
-            # Connect them chaotically
             for i in range(len(points)):
                 for j in range(i+1, len(points)):
                     p1 = points[i]
                     p2 = points[j]
                     dist = math.sqrt((p1[0]-p2[0])**2 + (p1[1]-p2[1])**2 + (p1[2]-p2[2])**2)
-                    if dist < 2.5: # Only connect neighbors
+                    if dist < 2.5: 
                         verts.append((p1[0]*scale, p1[1]*scale, p1[2]*scale))
                         verts.append((p2[0]*scale, p2[1]*scale, p2[2]*scale))
         return Mesh(verts, GL_LINES)
 
     def draw(self):
         zone_threshold = config.ZONE_THRESHOLDS['GHOST_ROOM']
-        # The room is centered slightly after the threshold
         room_z = zone_threshold - 100.0
         local_z = room_z - self.engine.world_offset_z
         
-        # Visibility check
-        dist = abs(self.engine.cam_pos[2] - local_z)
-        if dist > config.CULL_DISTANCE: return
+        if abs(self.engine.cam_pos[2] - local_z) > config.CULL_DISTANCE: return
 
-        glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT)
+        glPushAttrib(GL_ENABLE_BIT | GL_CURRENT_BIT | GL_LIGHTING_BIT)
         glDisable(GL_TEXTURE_2D)
         glEnable(GL_BLEND)
-        glLineWidth(1.5)
 
         glPushMatrix()
         glTranslatef(0, 0, local_z)
 
-        # 1. Draw the Macintosh
+        # Draw Macintosh
         if self.loaded and self.mac_mesh:
             glPushMatrix()
             
-            # Animation state
             if self.engine.ghost_room_reached:
-                # Still position
                 y_float = 0
-                rotation = 0
+                rotation = 180
             else:
-                # Floating animation
                 y_float = math.sin(time.time() * 1.5) * 0.5
-                rotation = time.time() * 10.0
+                rotation = time.time() * 10.0 + 180
                 
             glTranslatef(0, y_float, 0)
             glRotatef(rotation, 0, 1, 0)
             
-            # Retro Beige/Green tint
-            glColor4f(0.8, 1.0, 0.8, 1.0) 
+            glEnable(GL_LIGHTING)
+            glEnable(GL_LIGHT0)
+            glLightfv(GL_LIGHT0, GL_POSITION, [1, 1, 1, 0])
+            glLightfv(GL_LIGHT0, GL_DIFFUSE, [1, 1, 1, 1])
+            glLightfv(GL_LIGHT0, GL_AMBIENT, [0.3, 0.3, 0.3, 1])
+            
             self.mac_mesh.draw()
             
-            # Draw "GHOST" text on the screen
-            # Assuming model is roughly centered. 
-            # We'll project the text slightly in front.
+            glDisable(GL_LIGHTING)
+            
+            # Draw "GHOST" text
             glPushMatrix()
             glEnable(GL_TEXTURE_2D)
             glTexEnvi(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE)
             
             lbl = self.engine.get_label("USER: ghost", config.COL_GHOST)
             
-            # Position relative to the model (empirically determined or guessed)
-            # The model is scaled to ~25.0 units.
-            glTranslatef(0, 5.0, 6.0) 
-            # Billboard it to face camera? Or fixed to screen?
-            # Fixed to screen looks better if the model rotates.
-            # But the model rotates around Y. 
-            # If we want it ON the screen, we need to know where the screen is.
-            # Let's just make it float above the computer.
-            
-            glScalef(0.05, 0.05, 0.05)
+            glTranslatef(0, 2.5, 3.0) 
+            glScalef(0.02, 0.02, 0.02)
             glTranslatef(-lbl.width/2, 0, 0)
             lbl.draw(0, 0, 0, 1.0)
             
@@ -1356,6 +1376,7 @@ class GhostRoom(GameObject):
 
         # 2. Draw Complex Geometry
         glPushMatrix()
+        glLineWidth(1.5)
         if self.engine.ghost_room_reached:
             # Intense morphing at the end
             glRotatef(time.time() * 25.0, 1, 0, 1)

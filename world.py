@@ -29,7 +29,6 @@ class World:
         self.data_buffer = collections.deque(maxlen=2000) 
         for _ in range(200): self.data_buffer.append(random.randint(0, 255))
         
-        # Narrative State
         self.breach_mode = False
         self.ghost_room_reached = False
         self.blackwall_timer = 0
@@ -42,11 +41,8 @@ class World:
         }
         self.zone_state = {}
         
-        # Glitch/Visual State
         self.glitch_level = 0.0 
 
-        # Scene Entities
-        # We delay entity creation slightly to ensure World is fully init
         self.entities = []
         self.particle_system = None
         

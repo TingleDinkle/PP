@@ -79,3 +79,47 @@ def load_glb_as_lines(file_path: str, target_scale: float = 20.0) -> Optional[Li
     except Exception as e:
         print(f"Failed to load/optimize model {file_path}: {e}")
         return None
+
+def load_glb_full(file_path: str, target_scale: float = 20.0) -> Optional[Tuple[np.ndarray, np.ndarray, np.ndarray]]:
+    """
+    Loads a GLB/GLTF file and returns data for solid rendering:
+    (Vertices, Normals, Colors) as numpy arrays of shape (N*3, 3) or (N*3, 4).
+    """
+    try:
+        scene_or_mesh = trimesh.load(file_path, force='mesh')
+        
+        if isinstance(scene_or_mesh, trimesh.Scene):
+            mesh = scene_or_mesh.dump(concatenate=True)
+        else:
+            mesh = scene_or_mesh
+
+        # --- Normalization ---
+        center = mesh.centroid
+        mesh.vertices -= center
+        
+        extents = mesh.extents
+        max_extent = np.max(extents)
+        if max_extent > 0:
+            scale_factor = target_scale / max_extent
+            mesh.vertices *= scale_factor
+
+        # --- Extract Faces, Normals, Colors ---
+        # Vertices for triangles
+        verts = mesh.vertices[mesh.faces].reshape(-1, 3)
+        # Normals for lighting
+        normals = mesh.face_normals.repeat(3, axis=0) # Per vertex
+        
+        # Colors (check if available, else default to beige)
+        if hasattr(mesh.visual, 'vertex_colors') and len(mesh.visual.vertex_colors) > 0:
+            # trimesh vertex_colors are per mesh vertex, we need per face vertex
+            colors = mesh.visual.vertex_colors[mesh.faces].reshape(-1, 4).astype(np.float32) / 255.0
+        else:
+            # Default Macintosh Beige
+            beige = [0.85, 0.8, 0.7, 1.0]
+            colors = np.tile(beige, (len(verts), 1)).astype(np.float32)
+
+        return verts, normals, colors
+        
+    except Exception as e:
+        print(f"Failed to load full model {file_path}: {e}")
+        return None
