@@ -26,6 +26,7 @@ class DOT11_SSID(ctypes.Structure):
 
 class WLAN_BSS_ENTRY(ctypes.Structure):
     _fields_ = [("dot11Ssid", DOT11_SSID),
+                ("_pad", wintypes.BYTE * 4), # Alignment padding for 64-bit
                 ("uPhyId", wintypes.ULONG),
                 ("dot11BssPhyType", wintypes.DWORD),
                 ("dot11BssType", wintypes.DWORD),
@@ -38,7 +39,8 @@ class WLAN_BSS_ENTRY(ctypes.Structure):
                 ("ullHostTimestamp", ctypes.c_ulonglong),
                 ("usCapabilityInformation", wintypes.USHORT),
                 ("ulChCenterFrequency", wintypes.ULONG),
-                ("wlanRateSet", wintypes.BYTE * 126), # Simplified
+                # WLAN_RATE_SET: ULONG (4) + USHORT[126] (252) = 256 bytes
+                ("wlanRateSet", wintypes.BYTE * 256), 
                 ("ulIeOffset", wintypes.ULONG),
                 ("ulIeSize", wintypes.ULONG)]
 
