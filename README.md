@@ -52,7 +52,7 @@ The codebase utilizes a component-based architecture to separate game logic from
 
 ### Option 1: Portable Executable (Recommended for Demos)
 1.  Install **[Npcap](https://npcap.com/)** (Ensure **"WinPcap API-compatible mode"** is checked).
-2.  Run `dist/Navi.exe`.
+2.  Run `dist/Navi.exe`. (can be found in Github Releases)
 
 ### Option 2: Python Environment
 1.  **Prerequisites**: Windows 10/11, Python 3.10+, and Npcap.
