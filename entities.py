@@ -1309,10 +1309,19 @@ class GhostRoom(GameObject):
         # 1. Draw the Macintosh
         if self.loaded and self.mac_mesh:
             glPushMatrix()
-            # Floating animation
-            y_float = math.sin(time.time() * 1.5) * 0.5
+            
+            # Animation state
+            if self.engine.ghost_room_reached:
+                # Still position
+                y_float = 0
+                rotation = 0
+            else:
+                # Floating animation
+                y_float = math.sin(time.time() * 1.5) * 0.5
+                rotation = time.time() * 10.0
+                
             glTranslatef(0, y_float, 0)
-            glRotatef(time.time() * 10.0, 0, 1, 0)
+            glRotatef(rotation, 0, 1, 0)
             
             # Retro Beige/Green tint
             glColor4f(0.8, 1.0, 0.8, 1.0) 
@@ -1347,9 +1356,17 @@ class GhostRoom(GameObject):
 
         # 2. Draw Complex Geometry
         glPushMatrix()
-        glRotatef(time.time() * 5.0, 1, 0, 1)
-        glRotatef(math.sin(time.time() * 0.2) * 30, 0, 1, 0)
-        glColor4f(0.5, 0.0, 1.0, 0.4) # Purple ether
+        if self.engine.ghost_room_reached:
+            # Intense morphing at the end
+            glRotatef(time.time() * 25.0, 1, 0, 1)
+            s = 1.0 + math.sin(time.time() * 2.0) * 0.1
+            glScalef(s, s, s)
+            glColor4f(0.7, 0.2, 1.0, 0.6)
+        else:
+            glRotatef(time.time() * 5.0, 1, 0, 1)
+            glRotatef(math.sin(time.time() * 0.2) * 30, 0, 1, 0)
+            glColor4f(0.5, 0.0, 1.0, 0.4) # Purple ether
+            
         self.geometry_mesh.draw()
         glPopMatrix()
         

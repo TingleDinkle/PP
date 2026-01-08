@@ -1,104 +1,95 @@
 # Navi // The Wired (v23.0)
 
-> *"No matter where you go, everyone's connected."*
+> "No matter where you go, everyone's connected."
 
-**Navi** is a high-fidelity, immersive 3D network visualizer built for the **CodeSpring Hackathon**. Inspired by the aesthetic of *Serial Experiments Lain*, it transforms invisible digital infrastructure—packets, processes, and wireless signals—into a tangible, navigable cyberspace.
-
-It is not just a dashboard; it is a flight simulator for your network interface.
+**Navi** is a 3D network visualization engine designed to translate abstract digital infrastructure into a navigable, atmospheric environment. It maps live network packets, system processes, and wireless signals into a procedural cyberspace, offering a unique perspective on the data flowing through your machine.
 
 ---
 
-## Visuals & Features
+## Visuals and Features
 
-The application renders an infinite, procedurally generated tunnel representing the depth of the network. As you travel deeper, the environment shifts through distinct "Zones":
+The application renders an infinite tunnel that represents the depth of the network. The environment evolves as you travel deeper through various zones.
 
 ### The Environment
-*   **Surface Layer:** Clean grid, standard system monitoring.
-*   **The Sprawl:** High-density geometric architecture representing local infrastructure.
-*   **Deep Web:** Green-tinted, heavy signal distortion, digital rain.
-*   **The Blackwall:** A red, unstable firewall boundary protecting the core.
-*   **Old Net:** Monochrome, static-laden ruins of legacy protocols.
+*   **Surface Layer**: Clean grid with standard system monitoring.
+*   **The Sprawl**: High-density geometry representing local infrastructure.
+*   **Deep Web**: Green-tinted signal distortion and digital rain.
+*   **The Blackwall**: A volatile red firewall boundary. Breach it by maintaining forward pressure against the system's resistance.
+*   **Old Net**: The monochrome ruins of legacy protocols.
+*   **The Ghost Room**: A final, hidden core reached after breaching the deepest layers. It contains a monolithic Macintosh 128k artifact and the presence of a "ghost" user.
 
-###  Data Entities
-*   **Holographic Packet Stream:** Real-time network traffic visualized as high-velocity projectiles.
-    *   **TCP:** Cyan Energy (Reliable, structured streams).
-    *   **UDP:** Orange Plasma (Fast, fire-and-forget streams).
-    *   **ICMP:** Magenta Beams (Ping/Diagnostic signals).
-    *   **Live Metadata:** Each packet carries a floating holographic label displaying its Destination IP and Protocol.
-*   **Process Orbitals:** Running system processes (`psutil`) rendered as satellites orbiting the central Hypercore.
-*   **WiFi Beacons:** Nearby networks (`netsh`) detected and displayed as floating signal towers.
-*   **Digital Rain:** Wall textures generated from the *actual hex payloads* of captured packets.
+### Data Entities
+*   **Holographic Packet Stream**: Real-time traffic visualized as high-velocity projectiles. **TCP** is rendered in cyan, **UDP** in orange, and other protocols in grey.
+*   **Process Orbitals**: System processes are rendered as satellites orbiting a central Hypercore. These can be terminated by clicking on them.
+*   **WiFi Visualizer**: Nearby wireless networks are displayed as signal towers on the tunnel walls.
+*   **Digital Rain**: Vertical data streams generated from the actual hex payloads of captured packets.
 
-### Technical Aesthetics
-*   **Post-Processing Pipeline:** Custom GLSL shaders for chromatic aberration, scanlines, and CRT distortion.
-*   **Webcam Integration:** "Ghost" reflection of the user mapped onto the environment using OpenCV Canny edge detection.
-*   **Spatial Audio:** Procedural drone and screech effects generated in real-time based on system load.
+### Technical Implementation
+*   **Shader Pipeline**: Custom GLSL shaders handle chromatic aberration, scanlines, and glitch effects.
+*   **Webcam Reflection**: A "ghost" image of the user is processed via Canny edge detection and mapped onto the 3D environment.
+*   **Spatial Audio**: Procedural drone and explosion effects that respond to system activity.
 
 ---
 
 ## System Architecture
 
-The codebase has been refactored for **engineering excellence**, utilizing modern Python practices (Type Hinting, Dataclasses) and a clean separation of concerns.
+The project is structured for modularity and performance:
 
-*   **`main_gl.py`**: The Orchestrator. Manages the OpenGL context, Event Loop, and Shader Pipeline.
-*   **`config.py`**: Centralized configuration for physics constants, colors, and zone thresholds.
-*   **`entities.py`**: A modular collection of 3D objects (`PacketSystem`, `DigitalRain`, `Hypercore`) inheriting from a strictly typed `GameObject` base.
-*   **`protocol.py`**: A robust, threaded packet sniffer using `scapy` and Python `dataclasses`.
-*   **`wifi_scanner.py`**: Async wrapper for Windows native WiFi commands.
+| Component | Responsibility |
+| :--- | :--- |
+| `main_gl.py` | Manages the OpenGL context, camera physics, and the main simulation loop. |
+| `config.py` | Central repository for colors, physics constants, and zone thresholds. |
+| `entities.py` | Contains the object classes for all 3D geometry, from the infinite tunnel to the final Ghost Room. |
+| `model_loader.py` | Handles the loading and optimization of GLB models into wireframe data. |
+| `protocol.py` | A threaded packet sniffer utilizing `scapy` to monitor live traffic. |
+| `wifi_scanner.py` | Interfaces with native system commands to track nearby wireless signals. |
 
 ---
 
-##  Installation
+## Installation
 
 ### Prerequisites
-*   **OS:** Windows 10 / 11 (Required for Npcap & `netsh`).
-*   **Python:** 3.10+
-*   **Driver:** **[Npcap](https://npcap.com/)** (Install with **"WinPcap API-compatible mode"** checked).
+*   **OS**: Windows 10 or 11 (required for native WiFi and network commands).
+*   **Python**: 3.10 or higher.
+*   **Driver**: **Npcap** must be installed. Ensure "WinPcap API-compatible mode" is selected during installation.
 
 ### Setup
-1.  **Clone the Uplink:**
+1.  **Clone the repository**:
     ```bash
     git clone https://github.com/TingleDinkle/Navi.git
     cd Navi
     ```
 
-2.  **Initialize Environment:**
+2.  **Initialize a virtual environment**:
     ```bash
     python -m venv venv
     .\venv\Scripts\activate
     ```
 
-3.  **Install Dependencies:**
+3.  **Install dependencies**:
     ```bash
-    pip install -r requirements.txt
-    # Or manually:
-    pip install pygame opencv-python scapy numpy PyOpenGL PyOpenGL_accelerate psutil
+    pip install pygame opencv-python scapy numpy PyOpenGL PyOpenGL_accelerate psutil trimesh
     ```
 
-4.  **Jack In:**
+4.  **Run the application**:
     ```bash
     python main_gl.py
     ```
 
 ---
 
-##  Controls
+## Controls
 
-Navigate **The Wired** using standard First-Person flight controls:
-
-*   **W / S:**  Fly Forward / Backward (Deep Dive)
-*   **A / D:**  Strafe Left / Right
-*   **Mouse:**  Look Around
-*   **L-Click:** Terminate Process (Target a Satellite)
-*   **ESC:**    Jack Out
+*   **W / S**: Fly Forward / Backward
+*   **A / D**: Strafe Left / Right
+*   **Mouse**: Look Around
+*   **Left Click**: Terminate a targeted process satellite.
+*   **ESC**: Exit the application.
 
 ---
 
-##  Disclaimer
+## Technical Notes
 
-**Navi** acts as a passive network sniffer. It captures and visualizes traffic on your local network interface for educational and artistic purposes. 
-*   **Privacy:** No data is stored or transmitted externally.
-*   **Safety:** Ensure you have permission to monitor the network you are connected to.
+Navi acts as a passive network sniffer for educational and artistic purposes. It does not store or transmit any captured data externally. Users should ensure they have the necessary permissions to monitor the network they are connected to.
 
----
-*Status: Connected.
+**Status**: System operational. No exit found.
