@@ -77,6 +77,14 @@ The codebase utilizes a component-based architecture to separate game logic from
 *   **L-Click**: Terminate Process Satellite
 *   **ESC**: Exit Simulation
 
+## Assets and Attribution
+
+* **Macintosh 128k Model**
+    * *Source:* [Sketchfab](https://sketchfab.com/3d-models/macintosh-128k-896ea439b67b4606a23fb8b93be6af6d)
+    * *Author:* kreems
+    * *License:* [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/)
+    * *Changes:* Converted to GLB and scaled for OpenGL rendering.
+
 ---
 
 **Status**: System operational. No exit found.
