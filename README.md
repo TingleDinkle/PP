@@ -7,6 +7,9 @@
 It is designed not just as a tool, but as an immersive experience, a flight simulator for your network interface.
 
 ---
+## Demo
+
+https://www.youtube.com/watch?v=XYMUs1O_WXg
 
 ## Visuals and Features
 
